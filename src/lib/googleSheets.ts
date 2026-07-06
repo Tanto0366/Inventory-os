@@ -1,0 +1,629 @@
+import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog } from '../types';
+
+const DATABASE_NAME = 'InventoryOS_Database';
+
+const REQUIRED_SHEETS = [
+  'Dashboard',
+  'Assets Database',
+  'Transactions',
+  'Campaigns',
+  'Owners',
+  'Possessors',
+  'Locations',
+  'Gate Pass',
+  'Audit Trail',
+  'Reports',
+  'Lookup Tables',
+  'Settings',
+  'Admin',
+  'Hidden Config'
+];
+
+export interface SheetData {
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  assets: Asset[];
+  gatePasses: GatePass[];
+  auditLogs: AuditEntry[];
+  campaigns: Campaign[];
+  owners: Owner[];
+  possessors: Possessor[];
+  locations: LocationInfo[];
+  admins: AdminUser[];
+  adminLogs: AdminLog[];
+}
+
+// Helpers for headers
+const HEADERS = {
+  'Assets Database': [
+    'Asset ID', 'Serial Number', 'Item Name', 'Brand', 'Model', 'Description', 
+    'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
+    'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
+    'Created Date', 'Last Updated'
+  ],
+  'Gate Pass': [
+    'Gate Pass Number', 'Pass Type', 'Company', 'Serials', 'Origin', 'Destination', 
+    'Shipping Date', 'ETA', 'Receiver', 'Possessor After', 'New Status', 'Notes', 'Created Date'
+  ],
+  'Audit Trail': [
+    'Timestamp', 'Serial Number', 'Field Changed', 'Previous Value', 'New Value', 'Changed By', 'Reference'
+  ],
+  'Campaigns': [
+    'Campaign Name', 'Client', 'Start Date', 'End Date', 'Owner', 'Budget', 'Description', 'Campaign Status'
+  ],
+  'Owners': ['Owner Name', 'Company', 'Contact'],
+  'Possessors': ['Name', 'Role', 'Department'],
+  'Locations': ['City', 'Address', 'Type'],
+  'Settings': ['Setting Key', 'Setting Value']
+};
+
+const SAMPLE_ASSETS: Asset[] = [
+  { sn: 1, assetId: 'AST-000001', serial: 'PF5QGT2K', name: 'Laptop', desc: 'Lenovo Legion 5', qty: 1, brand: 'Lenovo', owner: 'No info', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Nil', receivedBy: 'Prem', receivedOn: '2026-01-02', shippingTo: 'Nil', shippingDate: 'Nil' },
+  { sn: 2, assetId: 'AST-000002', serial: 'HP-MULTI-6', name: 'Laptop', desc: 'HP', qty: 6, brand: 'HP', owner: 'AFMV', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Redington store Activity', receivedBy: 'Nikhil', receivedOn: '2026-01-12', shippingTo: 'Chennai', shippingDate: '2026-01-08' },
+  { sn: 3, assetId: 'AST-000003', serial: 'MPAD-AFMV-6', name: 'Mouse pad', desc: '', qty: 6, brand: 'Hyperx', owner: 'AFMV', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Redington store Activity', receivedBy: 'Nikhil', receivedOn: '2026-01-12', shippingTo: 'Chennai', shippingDate: '2026-01-08' },
+  { sn: 4, assetId: 'AST-000004', serial: 'MOUSE-HX-2', name: 'Mouse', desc: 'Hyperx', qty: 2, brand: 'Hyperx', owner: 'AFMV', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Redington store Activity', receivedBy: 'Nikhil', receivedOn: '2026-01-12', shippingTo: 'Chennai', shippingDate: '2026-01-08' },
+  { sn: 5, assetId: 'AST-000005', serial: 'LSTANDS-6', name: 'Laptop stands', desc: '', qty: 6, brand: 'Generic', owner: 'AFMV', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Redington store Activity', receivedBy: 'Nikhil', receivedOn: '2026-01-12', shippingTo: 'Chennai', shippingDate: '2026-01-08' },
+  { sn: 6, assetId: 'AST-000006', serial: 'HSET-HX-4', name: 'Headset', desc: 'Hyperx', qty: 4, brand: 'Hyperx', owner: 'AFMV', possessor: 'Nikhil', city: 'Bangalore', status: 'In House', campaign: 'Redington store Activity', receivedBy: 'Nikhil', receivedOn: '2026-01-12', shippingTo: 'Chennai', shippingDate: '2026-01-08' },
+  { sn: 7, assetId: 'AST-000007', serial: 'PF48LND0', name: 'Laptop', desc: 'Yoga 9i', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Karan', city: 'Mumbai', status: 'In House', campaign: 'Lenovo AP Yoga', receivedBy: 'Karan', receivedOn: '2026-01-09', shippingTo: 'Practice Office Delhi', shippingDate: '2026-02-09' },
+  { sn: 8, assetId: 'AST-000008', serial: 'PF4954J4', name: 'Laptop', desc: 'Yoga 9', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Karan', city: 'Mumbai', status: 'In House', campaign: 'Lenovo AP Yoga', receivedBy: 'Karan', receivedOn: '2026-01-09', shippingTo: 'Practice Office Delhi', shippingDate: '2026-02-09' },
+  { sn: 9, assetId: 'AST-000009', serial: 'YOGA7-001', name: 'Laptop', desc: 'Yoga 7', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Karan', city: 'Mumbai', status: 'In House', campaign: 'Lenovo AP Yoga', receivedBy: 'Karan', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 10, assetId: 'AST-000010', serial: 'PF5CXBPZ', name: 'Laptop', desc: 'Yoga Slim 9i', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Nabu', city: 'Bangalore', status: 'In House', campaign: 'Lenovo AP Yoga', receivedBy: 'Nabu', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 11, assetId: 'AST-000011', serial: 'PF4SX2SM', name: 'Laptop', desc: 'Yoga 9i', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Aditya', city: 'Delhi', status: 'Delivered', campaign: 'Lenovo AP Yoga', receivedBy: 'Aditya', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 12, assetId: 'AST-000012', serial: 'PF4SX2ZS', name: 'Laptop', desc: 'Yoga 9i', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Aditya', city: 'Delhi', status: 'Delivered', campaign: 'Lenovo AP Yoga', receivedBy: 'Aditya', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 13, assetId: 'AST-000013', serial: 'YX0E2GHG', name: 'Laptop', desc: 'Yoga 7 2-in-1', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Aditya', city: 'Delhi', status: 'Delivered', campaign: 'Lenovo AP Yoga', receivedBy: 'Aditya', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 14, assetId: 'AST-000014', serial: 'MOUSE-LNV-1', name: 'Mouse', desc: '', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Aditya', city: 'Delhi', status: 'Ready for Pickup', campaign: 'Lenovo AP Yoga', receivedBy: 'Aditya', receivedOn: '2026-01-09', shippingTo: '', shippingDate: '' },
+  { sn: 15, assetId: 'AST-000015', serial: '5CG5214PHW', name: 'Laptop', desc: 'OMEN 16 MAX', qty: 1, brand: 'OMEN', owner: 'Redington', possessor: 'Aditya', city: 'Kochi', status: 'Delivered', campaign: 'Red.Gaming', receivedBy: 'Aditya', receivedOn: '2026-01-25', shippingTo: 'Gurgaon - Nodwin office', shippingDate: '2026-01-28' },
+  { sn: 16, assetId: 'AST-000016', serial: '5CG5214PHJ', name: 'Laptop', desc: 'OMEN 16 MAX', qty: 1, brand: 'OMEN', owner: 'Redington', possessor: 'Aditya', city: 'Kochi', status: 'Delivered', campaign: 'Red.Gaming', receivedBy: 'Aditya', receivedOn: '2026-01-25', shippingTo: 'Gurgaon - Nodwin office', shippingDate: '2026-01-28' },
+  { sn: 17, assetId: 'AST-000017', serial: '5CG5214PJS', name: 'Laptop', desc: 'OMEN 16 MAX', qty: 1, brand: 'OMEN', owner: 'Redington', possessor: 'Aditya', city: 'Kochi', status: 'Delivered', campaign: 'Red.Gaming', receivedBy: 'Aditya', receivedOn: '2026-01-25', shippingTo: 'Gurgaon - Nodwin office', shippingDate: '2026-01-28' },
+  { sn: 18, assetId: 'AST-000018', serial: '5CD5305K7Z', name: 'Laptop', desc: 'OMEN 16', qty: 1, brand: 'OMEN', owner: 'Redington', possessor: 'Aditya', city: 'Kochi', status: 'Delivered', campaign: 'Red.Gaming', receivedBy: 'Aditya', receivedOn: '2026-01-25', shippingTo: 'Gurgaon - Nodwin office', shippingDate: '2026-01-28' },
+  { sn: 19, assetId: 'AST-000019', serial: 'HP-PATNA-6', name: 'Laptop', desc: 'HP', qty: 6, brand: 'HP', owner: 'AFMV', possessor: 'Aditya', city: 'Patna', status: 'Delivered', campaign: 'Red.Gaming', receivedBy: 'Aditya', receivedOn: '2026-01-23', shippingTo: 'Bangalore - Inventory house', shippingDate: '' },
+  { sn: 20, assetId: 'AST-000020', serial: 'MP2SRN3DQ', name: 'Laptop', desc: 'LOQ RTX 5050', qty: 1, brand: 'Lenovo', owner: 'Lenovo', possessor: 'Aditya', city: 'Delhi', status: 'Delivered', campaign: 'Lenovo AP Yoga', receivedBy: 'Aditya', receivedOn: '2026-01-28', shippingTo: 'Practice Office Delhi', shippingDate: '2026-02-09' }
+];
+
+const SAMPLE_GATE_PASSES: GatePass[] = [
+  { id: 'GP-001', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['PF48LND0', 'PF4954J4'], origin: 'Mumbai', dest: 'Practice Office Delhi', shipDate: '2026-01-09', eta: '2026-02-09', receiver: 'Karan', possessor: 'Karan', newStatus: 'In Transit', notes: 'Lenovo AP Yoga campaign delivery', createdDate: '2026-01-09' },
+  { id: 'GP-002', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['5CG5214PHW', '5CG5214PHJ', '5CG5214PJS', '5CD5305K7Z'], origin: 'Kochi', dest: 'Gurgaon - Nodwin office', shipDate: '2026-01-28', eta: '2026-02-01', receiver: 'Aditya', possessor: 'Aditya', newStatus: 'Delivered', notes: 'OMEN Red.Gaming event', createdDate: '2026-01-28' },
+  { id: 'GP-003', type: 'inbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['HP-MULTI-6'], origin: 'Chennai', dest: 'Bangalore', shipDate: '2026-01-08', eta: '2026-01-12', receiver: 'Nikhil', possessor: 'Nikhil', newStatus: 'In House', notes: 'Return from Redington Store Activity', createdDate: '2026-01-12' }
+];
+
+const SAMPLE_AUDIT: AuditEntry[] = [
+  { time: '2026-01-28 10:00', serial: '5CG5214PHW', field: 'Status', from: 'In House', to: 'Delivered', by: 'Warehouse Admin', note: 'GP-002' },
+  { time: '2026-01-28 10:00', serial: '5CG5214PHJ', field: 'Status', from: 'In House', to: 'Delivered', by: 'Warehouse Admin', note: 'GP-002' },
+  { time: '2026-01-28 10:00', serial: '5CG5214PJS', field: 'Status', from: 'In House', to: 'Delivered', by: 'Warehouse Admin', note: 'GP-002' },
+  { time: '2026-01-12 09:00', serial: 'HP-MULTI-6', field: 'Location', from: 'Chennai', to: 'Bangalore', by: 'Nikhil', note: 'GP-003 received' },
+  { time: '2026-01-09 11:30', serial: 'PF48LND0', field: 'Possessor', from: 'Warehouse', to: 'Karan', by: 'Warehouse Admin', note: 'GP-001' },
+  { time: '2026-01-09 11:30', serial: 'PF4954J4', field: 'Possessor', from: 'Warehouse', to: 'Karan', by: 'Warehouse Admin', note: 'GP-001' }
+];
+
+const SAMPLE_CAMPAIGNS: Campaign[] = [
+  { name: 'Lenovo AP Yoga', client: 'Lenovo India', startDate: '2026-01-01', endDate: '2026-03-31', owner: 'Aditya', budget: '₹5,00,000', description: 'Store activation for Yoga Premium laptops', status: 'Active' },
+  { name: 'Red.Gaming', client: 'Redington / HP', startDate: '2026-01-15', endDate: '2026-02-15', owner: 'Karan', budget: '₹12,00,000', description: 'Gaming roadshow at Nodwin centers', status: 'Active' }
+];
+
+const SAMPLE_OWNERS: Owner[] = [
+  { name: 'Lenovo', company: 'Lenovo India', contact: 'lenovo@afmv.in' },
+  { name: 'Redington', company: 'Redington Distribution', contact: 'redington@afmv.in' },
+  { name: 'AFMV', company: 'Aftermath Ventures', contact: 'aditya@aftermathventures.in' }
+];
+
+const SAMPLE_POSSESSORS: Possessor[] = [
+  { name: 'Nikhil', role: 'Store Lead', department: 'Logistics' },
+  { name: 'Karan', role: 'Operations', department: 'Events' },
+  { name: 'Aditya', role: 'Director', department: 'Strategy' },
+  { name: 'Nabu', role: 'Field Exec', department: 'Support' }
+];
+
+const SAMPLE_LOCATIONS: LocationInfo[] = [
+  { city: 'Bangalore', address: 'AFMV Main Warehouse, Indiranagar', type: 'Central' },
+  { city: 'Mumbai', address: 'Karan Office, Bandra East', type: 'Branch' },
+  { city: 'Delhi', address: 'Practice Office Delhi, Connaught Place', type: 'Site' },
+  { city: 'Kochi', address: 'Event Warehouse, Kakkanad', type: 'Site' }
+];
+
+// 1. Search for existing spreadsheet in user's Drive
+export async function findSpreadsheet(token: string): Promise<string | null> {
+  const query = `name = '${DATABASE_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+  
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Failed to search Drive');
+    const data = await res.json();
+    if (data.files && data.files.length > 0) {
+      return data.files[0].id;
+    }
+  } catch (e) {
+    console.error('Error finding spreadsheet:', e);
+  }
+  return null;
+}
+
+// 2. Create and provision a brand new spreadsheet with all sheets and headers
+export async function createAndProvisionSpreadsheet(token: string): Promise<SheetData> {
+  // Create spreadsheet container
+  const url = 'https://sheets.googleapis.com/v4/spreadsheets';
+  const createRes = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      properties: { title: DATABASE_NAME }
+    })
+  });
+
+  if (!createRes.ok) throw new Error('Failed to create new spreadsheet');
+  const spreadsheet = await createRes.json();
+  const spreadsheetId = spreadsheet.spreadsheetId;
+
+  // We need to add the required sheets. The first sheet is already there (usually 'Sheet1').
+  // We can rename 'Sheet1' to 'Dashboard' and add all other sheets.
+  const firstSheetId = spreadsheet.sheets?.[0]?.properties?.sheetId || 0;
+  
+  const requests: any[] = [
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: firstSheetId,
+          title: 'Dashboard'
+        },
+        fields: 'title'
+      }
+    }
+  ];
+
+  // Add the remaining sheets
+  REQUIRED_SHEETS.slice(1).forEach(title => {
+    requests.push({
+      addSheet: {
+        properties: { title }
+      }
+    });
+  });
+
+  const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+  const batchRes = await fetch(batchUpdateUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ requests })
+  });
+
+  if (!batchRes.ok) throw new Error('Failed to provision sheets');
+
+  // Populate Dashboard Sheet with clean welcome / overview information
+  const welcomeValues = [
+    ['InventoryOS spreadsheet Database — Connected'],
+    [],
+    ['Do not delete or rename worksheets! These are managed automatically by your InventoryOS App.'],
+    [],
+    ['Worksheet Name', 'Purpose', 'Record Count'],
+    ['Dashboard', 'Instructions and database state overview', '1'],
+    ['Assets Database', 'Master assets ledger with serial numbers and history', String(SAMPLE_ASSETS.length)],
+    ['Gate Pass', 'Logistics gate passes generated', String(SAMPLE_GATE_PASSES.length)],
+    ['Audit Trail', 'Change history log for serial tracking', String(SAMPLE_AUDIT.length)],
+    ['Campaigns', 'Marketing and client campaign assignments', String(SAMPLE_CAMPAIGNS.length)],
+    ['Owners', 'Asset owners lookup', String(SAMPLE_OWNERS.length)],
+    ['Possessors', 'Staff members currently assigned assets', String(SAMPLE_POSSESSORS.length)],
+    ['Locations', 'Operating locations and warehouses', String(SAMPLE_LOCATIONS.length)],
+    ['Settings', 'Configuration variables', '0']
+  ];
+
+  // Pre-populate with Sample Data
+  const updates = [
+    { range: 'Dashboard!A1:C14', values: welcomeValues },
+    { range: 'Assets Database!A1:R1', values: [HEADERS['Assets Database']] },
+    { range: `Assets Database!A2:R${SAMPLE_ASSETS.length + 1}`, values: SAMPLE_ASSETS.map(mapAssetToRow) },
+    { range: 'Gate Pass!A1:M1', values: [HEADERS['Gate Pass']] },
+    { range: `Gate Pass!A2:M${SAMPLE_GATE_PASSES.length + 1}`, values: SAMPLE_GATE_PASSES.map(mapGatePassToRow) },
+    { range: 'Audit Trail!A1:G1', values: [HEADERS['Audit Trail']] },
+    { range: `Audit Trail!A2:G${SAMPLE_AUDIT.length + 1}`, values: SAMPLE_AUDIT.map(mapAuditToRow) },
+    { range: 'Campaigns!A1:H1', values: [HEADERS['Campaigns']] },
+    { range: `Campaigns!A2:H${SAMPLE_CAMPAIGNS.length + 1}`, values: SAMPLE_CAMPAIGNS.map(mapCampaignToRow) },
+    { range: 'Owners!A1:C1', values: [HEADERS['Owners']] },
+    { range: `Owners!A2:C${SAMPLE_OWNERS.length + 1}`, values: SAMPLE_OWNERS.map(o => [o.name, o.company, o.contact]) },
+    { range: 'Possessors!A1:C1', values: [HEADERS['Possessors']] },
+    { range: `Possessors!A2:C${SAMPLE_POSSESSORS.length + 1}`, values: SAMPLE_POSSESSORS.map(p => [p.name, p.role, p.department]) },
+    { range: 'Locations!A1:C1', values: [HEADERS['Locations']] },
+    { range: `Locations!A2:C${SAMPLE_LOCATIONS.length + 1}`, values: SAMPLE_LOCATIONS.map(l => [l.city, l.address, l.type]) },
+    { range: 'Admin!A1:D1', values: [['Email', 'Role', 'Granted By', 'Granted On']] },
+    { range: 'Admin!A2:D2', values: [['aditya@aftermathventures.in', 'Super Admin', 'System', new Date().toISOString().split('T')[0]]] },
+    { range: 'Admin!F1:I1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By']] }
+  ];
+
+  await writeBatchValues(spreadsheetId, token, updates);
+
+  return {
+    spreadsheetId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
+    assets: SAMPLE_ASSETS,
+    gatePasses: SAMPLE_GATE_PASSES,
+    auditLogs: SAMPLE_AUDIT,
+    campaigns: SAMPLE_CAMPAIGNS,
+    owners: SAMPLE_OWNERS,
+    possessors: SAMPLE_POSSESSORS,
+    locations: SAMPLE_LOCATIONS,
+    admins: [
+      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+    ],
+    adminLogs: []
+  };
+}
+
+// 3. Load entire database from spreadsheet in batch
+export async function loadSpreadsheetData(spreadsheetId: string, token: string): Promise<SheetData> {
+  const ranges = [
+    'Assets Database!A1:R2000',
+    'Gate Pass!A1:M1000',
+    'Audit Trail!A1:G3000',
+    'Campaigns!A1:H500',
+    'Owners!A1:C500',
+    'Possessors!A1:C500',
+    'Locations!A1:C500',
+    'Admin!A1:D500',
+    'Admin!F1:I1000'
+  ];
+
+  const queryParams = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${queryParams}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!res.ok) throw new Error('Failed to batch load spreadsheet sheets');
+  const result = await res.json();
+  const valueRanges = result.valueRanges || [];
+
+  const assets = parseRowsToAssets(valueRanges[0]?.values || []);
+  const gatePasses = parseRowsToGatePasses(valueRanges[1]?.values || []);
+  const auditLogs = parseRowsToAudit(valueRanges[2]?.values || []);
+  const campaigns = parseRowsToCampaigns(valueRanges[3]?.values || []);
+  const owners = parseRowsToOwners(valueRanges[4]?.values || []);
+  const possessors = parseRowsToPossessors(valueRanges[5]?.values || []);
+  const locations = parseRowsToLocations(valueRanges[6]?.values || []);
+  const admins = parseRowsToAdmins(valueRanges[7]?.values || []);
+  const adminLogs = parseRowsToAdminLogs(valueRanges[8]?.values || []);
+
+  return {
+    spreadsheetId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
+    assets,
+    gatePasses,
+    auditLogs,
+    campaigns,
+    owners,
+    possessors,
+    locations,
+    admins,
+    adminLogs
+  };
+}
+
+// 4. Overwrite/save the entire Assets worksheet or append
+export async function saveAssetsSheet(spreadsheetId: string, token: string, assets: Asset[]): Promise<void> {
+  // Overwrite entire A2:R range to match the updated state
+  const values = assets.map(mapAssetToRow);
+  
+  // We first clear any potential old values, or overwrite with full array.
+  // Overwriting A2:R with values
+  const range = `Assets Database!A2:R${assets.length + 100}`; // buffer clear
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
+  await fetch(clearUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  const writeRange = `Assets Database!A2:R${assets.length + 1}`;
+  await writeValues(spreadsheetId, token, writeRange, values);
+}
+
+// 5. Append new Gate Pass
+export async function appendGatePass(spreadsheetId: string, token: string, gp: GatePass): Promise<void> {
+  const row = mapGatePassToRow(gp);
+  const range = 'Gate Pass!A2';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  
+  await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      values: [row]
+    })
+  });
+}
+
+// 6. Append new Audit Entry
+export async function appendAuditLog(spreadsheetId: string, token: string, log: AuditEntry): Promise<void> {
+  const row = mapAuditToRow(log);
+  const range = 'Audit Trail!A2';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  
+  await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      values: [row]
+    })
+  });
+}
+
+// 7. Sync Campaigns, Owners, Possessors, Locations
+export async function saveCampaignsSheet(spreadsheetId: string, token: string, campaigns: Campaign[]): Promise<void> {
+  const values = campaigns.map(mapCampaignToRow);
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Campaigns!A2:H200:clear`;
+  await fetch(clearUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+  await writeValues(spreadsheetId, token, `Campaigns!A2:H${campaigns.length + 1}`, values);
+}
+
+// Bulk general batch writer
+async function writeBatchValues(spreadsheetId: string, token: string, updates: { range: string, values: any[][] }[]): Promise<void> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
+  const data = {
+    valueInputOption: 'USER_ENTERED',
+    data: updates.map(u => ({ range: u.range, values: u.values }))
+  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Failed batch update sheet');
+}
+
+async function writeValues(spreadsheetId: string, token: string, range: string, values: any[][]): Promise<void> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ values })
+  });
+  if (!res.ok) throw new Error(`Failed to write values to range ${range}`);
+}
+
+// Mapping Utilities
+function mapAssetToRow(a: Asset): any[] {
+  return [
+    a.assetId || '',
+    a.serial || '',
+    a.name || '',
+    a.brand || '',
+    a.desc || '',
+    a.qty || 1,
+    a.city || '',
+    a.owner || '',
+    a.possessor || '',
+    a.campaign || '',
+    a.status || '',
+    a.receivedBy || '',
+    a.receivedOn || '',
+    a.shippingTo || '',
+    a.shippingDate || '',
+    a.createdDate || new Date().toISOString().split('T')[0],
+    a.lastUpdated || new Date().toISOString().split('T')[0]
+  ];
+}
+
+function mapGatePassToRow(g: GatePass): any[] {
+  return [
+    g.id || '',
+    g.type || 'outbound',
+    g.company || '',
+    JSON.stringify(g.serials || []),
+    g.origin || '',
+    g.dest || '',
+    g.shipDate || '',
+    g.eta || '',
+    g.receiver || '',
+    g.possessor || '',
+    g.newStatus || '',
+    g.notes || '',
+    g.createdDate || new Date().toISOString().split('T')[0]
+  ];
+}
+
+function mapAuditToRow(l: AuditEntry): any[] {
+  return [
+    l.time || '',
+    l.serial || '',
+    l.field || '',
+    l.from || '',
+    l.to || '',
+    l.by || '',
+    l.note || ''
+  ];
+}
+
+function mapCampaignToRow(c: Campaign): any[] {
+  return [
+    c.name || '',
+    c.client || '',
+    c.startDate || '',
+    c.endDate || '',
+    c.owner || '',
+    c.budget || '',
+    c.description || '',
+    c.status || 'Active'
+  ];
+}
+
+// Parser Utilities
+function parseRowsToAssets(rows: any[][]): Asset[] {
+  if (rows.length <= 1) return [];
+  const body = rows.slice(1);
+  return body.map((r, i) => ({
+    sn: i + 1,
+    assetId: String(r[0] || ''),
+    serial: String(r[1] || ''),
+    name: String(r[2] || ''),
+    brand: String(r[3] || ''),
+    desc: String(r[4] || ''),
+    qty: parseInt(r[5]) || 1,
+    city: String(r[6] || ''),
+    owner: String(r[7] || ''),
+    possessor: String(r[8] || ''),
+    campaign: String(r[9] || ''),
+    status: String(r[10] || ''),
+    receivedBy: String(r[11] || ''),
+    receivedOn: String(r[12] || ''),
+    shippingTo: String(r[13] || ''),
+    shippingDate: String(r[14] || ''),
+    createdDate: String(r[15] || ''),
+    lastUpdated: String(r[16] || '')
+  })).filter(a => a.serial && a.name);
+}
+
+function parseRowsToGatePasses(rows: any[][]): GatePass[] {
+  if (rows.length <= 1) return [];
+  const body = rows.slice(1);
+  return body.map(r => {
+    let serials: string[] = [];
+    try {
+      const parsed = JSON.parse(r[3] || '[]');
+      serials = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      serials = r[3] ? String(r[3]).split(',').map(s => s.trim()) : [];
+    }
+    return {
+      id: String(r[0] || ''),
+      type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+      company: String(r[2] || ''),
+      serials,
+      origin: String(r[4] || ''),
+      dest: String(r[5] || ''),
+      shipDate: String(r[6] || ''),
+      eta: String(r[7] || ''),
+      receiver: String(r[8] || ''),
+      possessor: String(r[9] || ''),
+      newStatus: String(r[10] || ''),
+      notes: String(r[11] || ''),
+      createdDate: String(r[12] || '')
+    };
+  }).filter(g => g.id);
+}
+
+function parseRowsToAudit(rows: any[][]): AuditEntry[] {
+  if (rows.length <= 1) return [];
+  const body = rows.slice(1);
+  return body.map(r => ({
+    time: String(r[0] || ''),
+    serial: String(r[1] || ''),
+    field: String(r[2] || ''),
+    from: String(r[3] || ''),
+    to: String(r[4] || ''),
+    by: String(r[5] || ''),
+    note: String(r[6] || '')
+  })).filter(l => l.serial);
+}
+
+function parseRowsToCampaigns(rows: any[][]): Campaign[] {
+  if (rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    name: String(r[0] || ''),
+    client: String(r[1] || ''),
+    startDate: String(r[2] || ''),
+    endDate: String(r[3] || ''),
+    owner: String(r[4] || ''),
+    budget: String(r[5] || ''),
+    description: String(r[6] || ''),
+    status: String(r[7] || 'Active')
+  })).filter(c => c.name);
+}
+
+function parseRowsToOwners(rows: any[][]): Owner[] {
+  if (rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    name: String(r[0] || ''),
+    company: String(r[1] || ''),
+    contact: String(r[2] || '')
+  })).filter(o => o.name);
+}
+
+function parseRowsToPossessors(rows: any[][]): Possessor[] {
+  if (rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    name: String(r[0] || ''),
+    role: String(r[1] || ''),
+    department: String(r[2] || '')
+  })).filter(p => p.name);
+}
+
+function parseRowsToLocations(rows: any[][]): LocationInfo[] {
+  if (rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    city: String(r[0] || ''),
+    address: String(r[1] || ''),
+    type: String(r[2] || '')
+  })).filter(l => l.city);
+}
+
+function parseRowsToAdmins(rows: any[][]): AdminUser[] {
+  if (!rows || rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    email: String(r[0] || '').trim(),
+    role: String(r[1] || 'Super Admin').trim(),
+    grantedBy: String(r[2] || 'System').trim(),
+    grantedOn: String(r[3] || '').trim()
+  })).filter(a => a.email);
+}
+
+function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
+  if (!rows || rows.length <= 1) return [];
+  return rows.slice(1).map(r => ({
+    timestamp: String(r[0] || '').trim(),
+    action: String(r[1] || '').trim(),
+    targetEmail: String(r[2] || '').trim(),
+    performedBy: String(r[3] || '').trim()
+  })).filter(l => l.timestamp);
+}
+
+// Save entire Admins list
+export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
+  const headers = ['Email', 'Role', 'Granted By', 'Granted On'];
+  const values = admins.map(a => [a.email, a.role, a.grantedBy, a.grantedOn]);
+  
+  // Clear first
+  const range = 'Admin!A1:D500';
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
+  await fetch(clearUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  await writeValues(spreadsheetId, token, `Admin!A1:D${admins.length + 1}`, [headers, ...values]);
+}
+
+// Append an admin log
+export async function appendAdminLog(spreadsheetId: string, token: string, log: AdminLog): Promise<void> {
+  const row = [log.timestamp, log.action, log.targetEmail, log.performedBy];
+  const range = 'Admin!F2';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  
+  await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      values: [row]
+    })
+  });
+}

@@ -1,0 +1,6 @@
+{
+  "name": "InventoryOS",
+  "description": "A fully functional spreadsheet-integrated Inventory Management System that syncs live with Google Sheets, tracks assets, generates gate passes, and maintains complete audit logs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
