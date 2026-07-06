@@ -135,7 +135,7 @@ export async function findSpreadsheet(token: string): Promise<string | null> {
       return data.files[0].id;
     }
   } catch (e) {
-    console.error('Error finding spreadsheet:', e);
+    console.warn('Network issue or unauthorized when finding spreadsheet:', e);
   }
   return null;
 }
@@ -626,4 +626,22 @@ export async function appendAdminLog(spreadsheetId: string, token: string, log: 
       values: [row]
     })
   });
+}
+
+export function getSampleSheetData(): SheetData {
+  return {
+    spreadsheetId: 'SAMPLE_SPREADSHEET_ID',
+    spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/SAMPLE_SPREADSHEET_ID',
+    assets: SAMPLE_ASSETS,
+    gatePasses: SAMPLE_GATE_PASSES,
+    auditLogs: SAMPLE_AUDIT,
+    campaigns: SAMPLE_CAMPAIGNS,
+    owners: SAMPLE_OWNERS,
+    possessors: SAMPLE_POSSESSORS,
+    locations: SAMPLE_LOCATIONS,
+    admins: [
+      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+    ],
+    adminLogs: []
+  };
 }

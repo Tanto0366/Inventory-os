@@ -2,11 +2,14 @@ import React from 'react';
 
 interface LoginViewProps {
   onLogin: () => void;
+  onLoginDemo: () => void;
   isLoggingIn: boolean;
   error: string | null;
 }
 
-export default function LoginView({ onLogin, isLoggingIn, error }: LoginViewProps) {
+export default function LoginView({ onLogin, onLoginDemo, isLoggingIn, error }: LoginViewProps) {
+  const isUnauthorizedDomain = error && error.includes('unauthorized-domain');
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA] px-4">
       <div className="max-w-md w-full bg-white border border-[#E9ECEF] rounded-3xl p-10 shadow-sm transition-all duration-300">
@@ -46,14 +49,33 @@ export default function LoginView({ onLogin, isLoggingIn, error }: LoginViewProp
           </div>
         </div>
 
-        {/* Error messaging */}
+        {/* Error messaging & Troubleshooting instructions */}
         {error && (
-          <div className="mb-6 p-3 text-xs bg-red-50 border border-red-100 rounded-xl text-red-700 text-center font-medium">
-            {error}
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-950 text-left space-y-3 text-xs">
+            <p className="font-bold flex items-center gap-1.5 text-amber-800">
+              ⚠️ {isUnauthorizedDomain ? 'Firebase Domain Unauthorized' : 'Sign-In Notice'}
+            </p>
+            <p className="leading-relaxed text-amber-900">
+              {isUnauthorizedDomain ? (
+                <>
+                  This domain (<strong className="font-mono bg-white/50 px-1 py-0.5 rounded border border-amber-200">{window.location.hostname}</strong>) is not authorized in your Firebase console under Authentication Settings.
+                </>
+              ) : error}
+            </p>
+            {isUnauthorizedDomain && (
+              <div className="text-[11px] bg-white border border-amber-250 rounded-xl p-3 text-amber-900 leading-relaxed space-y-1.5">
+                <span className="font-bold block text-amber-950">How to authorize:</span>
+                <ol className="list-decimal list-inside space-y-1 text-amber-800">
+                  <li>Open the <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="underline font-bold text-[#6C5CE7] hover:text-[#5A4ED1]">Firebase Console</a></li>
+                  <li>Go to <strong>Authentication &gt; Settings &gt; Authorized domains</strong></li>
+                  <li>Click <strong>Add domain</strong> and enter: <span className="font-mono bg-amber-50 border border-amber-200 px-1 py-0.5 rounded select-all">{window.location.hostname}</span></li>
+                </ol>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Sign In Button */}
+        {/* Sign In Buttons */}
         <div className="flex flex-col items-center">
           <button 
             onClick={onLogin}
@@ -72,6 +94,27 @@ export default function LoginView({ onLogin, isLoggingIn, error }: LoginViewProp
             </span>
           </button>
           
+          {/* Demo Mode Separator and Button */}
+          <div className="w-full mt-6">
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-gray-200"></div>
+              <span className="flex-shrink mx-4 text-[10px] text-gray-400 font-medium uppercase tracking-wider font-mono">OR</span>
+              <div className="flex-grow border-t border-gray-200"></div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={onLoginDemo}
+              disabled={isLoggingIn}
+              className="w-full mt-2 flex items-center justify-center gap-2 px-6 py-2.5 border border-transparent rounded-xl bg-[#6C5CE7]/10 hover:bg-[#6C5CE7]/15 text-[#6C5CE7] font-semibold text-xs transition-all active:scale-98 disabled:opacity-50 cursor-pointer"
+            >
+              🔑 Access in Guest Admin Mode (Offline/Demo)
+            </button>
+            <p className="text-[10px] text-center text-[#636E72] mt-2 italic leading-normal">
+              Proceed immediately using client-side secure local storage to manage and log assets.
+            </p>
+          </div>
+
           <div className="mt-8 text-center">
             <span className="text-[10px] text-[#ADB5BD] font-mono">
               SECURE OAUTH2 · GEN CLIENT 1.0

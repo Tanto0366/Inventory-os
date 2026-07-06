@@ -37,7 +37,8 @@ import {
   appendAuditLog,
   saveCampaignsSheet,
   saveAdminsSheet,
-  appendAdminLog
+  appendAdminLog,
+  getSampleSheetData
 } from './lib/googleSheets';
 
 import LoginView from './components/LoginView';
@@ -61,22 +62,83 @@ export default function App() {
   const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
-  // Core Data state
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [gatePasses, setGatePasses] = useState<GatePass[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [owners, setOwners] = useState<Owner[]>([]);
-  const [possessors, setPossessors] = useState<Possessor[]>([]);
-  const [locations, setLocations] = useState<LocationInfo[]>([]);
+  // Core Data state with robust local fallback
+  const [assets, setAssets] = useState<Asset[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_assets');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().assets;
+  });
+
+  const [gatePasses, setGatePasses] = useState<GatePass[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_gatepasses');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().gatePasses;
+  });
+
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_auditlogs');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().auditLogs;
+  });
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_campaigns');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().campaigns;
+  });
+
+  const [owners, setOwners] = useState<Owner[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_owners');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().owners;
+  });
+
+  const [possessors, setPossessors] = useState<Possessor[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_possessors');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().possessors;
+  });
+
+  const [locations, setLocations] = useState<LocationInfo[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_locations');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().locations;
+  });
 
   // Navigation / UI state
   const [activeTab, setActiveTab] = useState<'dashboard' | 'assets' | 'gatepasses' | 'timeline' | 'audit' | 'campaigns' | 'import' | 'superadmin'>('dashboard');
-  const [adminsList, setAdminsList] = useState<AdminUser[]>([
-    { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: '2026-07-06' }
-  ]);
-  const [adminLogs, setAdminLogs] = useState<AdminLog[]>([]);
+  
+  const [adminsList, setAdminsList] = useState<AdminUser[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_admins');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().admins;
+  });
+
+  const [adminLogs, setAdminLogs] = useState<AdminLog[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_adminlogs');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().adminLogs;
+  });
 
   const isAdmin = !!(user && (
     user.email === 'aditya@aftermathventures.in' || 
@@ -127,6 +189,61 @@ export default function App() {
   // Import Preview State
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<Asset[]>([]);
+
+  // Synchronize state changes to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_assets', JSON.stringify(assets));
+    } catch {}
+  }, [assets]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_gatepasses', JSON.stringify(gatePasses));
+    } catch {}
+  }, [gatePasses]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_auditlogs', JSON.stringify(auditLogs));
+    } catch {}
+  }, [auditLogs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_campaigns', JSON.stringify(campaigns));
+    } catch {}
+  }, [campaigns]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_owners', JSON.stringify(owners));
+    } catch {}
+  }, [owners]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_possessors', JSON.stringify(possessors));
+    } catch {}
+  }, [possessors]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_locations', JSON.stringify(locations));
+    } catch {}
+  }, [locations]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(adminsList));
+    } catch {}
+  }, [adminsList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_adminlogs', JSON.stringify(adminLogs));
+    } catch {}
+  }, [adminLogs]);
 
   // Initialize Auth listeners on load
   useEffect(() => {
@@ -188,6 +305,34 @@ export default function App() {
     }
   };
 
+  const handleLoginDemo = () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      setUser({
+        uid: 'demo-user-id',
+        email: 'aditya@aftermathventures.in', // Match primary owner so they get full administrative permissions
+        displayName: 'Demo Guest Administrator',
+        photoURL: ''
+      } as any);
+      setToken('DEMO_TOKEN');
+      setNeedsAuth(false);
+      setSyncError('DEMO_MODE'); // Indicator that we are operating in Local Offline mode
+      
+      const log = {
+        timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+        action: 'Demo Session Started',
+        targetEmail: 'aditya@aftermathventures.in',
+        performedBy: 'Demo Guest'
+      };
+      setAdminLogs(prev => [log, ...prev]);
+    } catch (err: any) {
+      setAuthError(err.message || 'Demo access failed.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   const handleLogout = async () => {
     if (window.confirm('Are you sure you want to log out? Your local sync state will be cleared.')) {
       await logout();
@@ -202,10 +347,27 @@ export default function App() {
     }
   };
 
+  // Helper: Run Google Sheets operation with offline-resilience try/catch wrapper
+  const runSheetSync = async (fn: () => Promise<void>) => {
+    if (spreadsheetId && token) {
+      setIsSyncing(true);
+      try {
+        await fn();
+        setSyncError(null);
+      } catch (e: any) {
+        console.warn('Sheets operation deferred (operating in local-only mode):', e.message || e);
+        setSyncError(e.message || 'Offline');
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  };
+
   // Sync Google Sheets integration
   const triggerSheetsSync = async (activeToken: string | null = token) => {
     if (!activeToken) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
       let sheetId = await findSpreadsheet(activeToken);
       let data;
@@ -235,9 +397,10 @@ export default function App() {
         setAdminLogs(data.adminLogs);
       }
       setLastSync(new Date());
-    } catch (e) {
-      console.error('Sync Error:', e);
-      alert('Unable to sync Google Sheets database. Check connection or reload.');
+      setSyncError(null);
+    } catch (e: any) {
+      console.warn('Google Sheets Sync is currently offline (operating in Local Mode):', e.message || e);
+      setSyncError(e.message || 'Failed to fetch');
     } finally {
       setIsSyncing(false);
     }
@@ -252,7 +415,11 @@ export default function App() {
     };
     setAdminLogs(prev => [log, ...prev]);
     if (spreadsheetId && token) {
-      await appendAdminLog(spreadsheetId, token, log);
+      try {
+        await appendAdminLog(spreadsheetId, token, log);
+      } catch (e: any) {
+        console.warn('Deferred appending admin log:', e.message || e);
+      }
     }
   };
 
@@ -273,7 +440,11 @@ export default function App() {
     setAuditLogs(prev => [log, ...prev]);
     // Save to Google sheet
     if (spreadsheetId && token) {
-      await appendAuditLog(spreadsheetId, token, log);
+      try {
+        await appendAuditLog(spreadsheetId, token, log);
+      } catch (e: any) {
+        console.warn('Deferred appending audit log:', e.message || e);
+      }
     }
   };
 
@@ -317,12 +488,10 @@ export default function App() {
     setAddAssetOpen(false);
 
     // Sync sheet
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, nextAssets);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, nextAssets);
       await logTransaction(cleanedSerial, 'Status', '—', newAsset.status, 'Asset Registration');
-      setIsSyncing(false);
-    }
+    });
 
     // Reset Form
     setAssetForm({
@@ -382,9 +551,8 @@ export default function App() {
     setAssets(updatedAssets);
     setEditAssetOpen(false);
 
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, updatedAssets);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, updatedAssets);
       
       // Log any key audits
       if (original.status !== assetForm.status) {
@@ -396,33 +564,28 @@ export default function App() {
       if (original.city !== assetForm.city) {
         await logTransaction(editingSerial, 'Location', original.city, assetForm.city, 'Details update');
       }
-      setIsSyncing(false);
-    }
+    });
     setEditingSerial(null);
   };
 
   const handleDeleteAsset = async (serial: string) => {
     const updated = assets.filter(a => a.serial !== serial);
     setAssets(updated);
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, updated);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, updated);
       await logTransaction(serial, 'Deleted', 'Active', 'Archived', 'Removal');
-      setIsSyncing(false);
-    }
+    });
   };
 
   const handleBulkDelete = async (serials: string[]) => {
     const updated = assets.filter(a => !serials.includes(a.serial));
     setAssets(updated);
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, updated);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, updated);
       for (const s of serials) {
         await logTransaction(s, 'Deleted', 'Active', 'Archived', 'Bulk deletion');
       }
-      setIsSyncing(false);
-    }
+    });
   };
 
   // Issue Gate Pass handlers
@@ -472,10 +635,9 @@ export default function App() {
     setGatePasses([newPass, ...gatePasses]);
     setGatePassOpen(false);
 
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, updatedAssets);
-      await appendGatePass(spreadsheetId, token, newPass);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, updatedAssets);
+      await appendGatePass(spreadsheetId!, token!, newPass);
       
       // Log logs for each asset
       for (const sn of (Array.from(gpSelectedSerials) as string[])) {
@@ -485,8 +647,7 @@ export default function App() {
           await logTransaction(sn, 'Possessor', original?.possessor || 'Warehouse', gpForm.possessor, nextId);
         }
       }
-      setIsSyncing(false);
-    }
+    });
 
     // Reset Form
     setGpSelectedSerials(new Set());
@@ -589,14 +750,12 @@ export default function App() {
     setAssets(nextAssetsList);
     setImportPreviewOpen(false);
 
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      await saveAssetsSheet(spreadsheetId, token, nextAssetsList);
+    await runSheetSync(async () => {
+      await saveAssetsSheet(spreadsheetId!, token!, nextAssetsList);
       for (const incoming of uniqueIncoming) {
         await logTransaction(incoming.serial, 'Status', '—', incoming.status, 'XLSX Import');
       }
-      setIsSyncing(false);
-    }
+    });
     alert(`Imported ${uniqueIncoming.length} unique assets successfully!`);
     setPendingImportData([]);
   };
@@ -698,6 +857,7 @@ export default function App() {
     return (
       <LoginView 
         onLogin={handleLogin}
+        onLoginDemo={handleLoginDemo}
         isLoggingIn={isLoggingIn}
         error={authError}
       />
@@ -1069,9 +1229,9 @@ export default function App() {
                         ];
                         
                         setAdminsList(nextAdmins);
-                        if (spreadsheetId && token) {
-                          await saveAdminsSheet(spreadsheetId, token, nextAdmins);
-                        }
+                        await runSheetSync(async () => {
+                          await saveAdminsSheet(spreadsheetId!, token!, nextAdmins);
+                        });
                         await logAdminAction('Granted Super Admin', email);
                         emailInput.value = '';
                         alert(`Super Admin authority granted successfully to ${email}`);
@@ -1134,9 +1294,9 @@ export default function App() {
                                       if (window.confirm(`Are you sure you want to revoke Super Admin status from ${admin.email}?`)) {
                                         const nextAdmins = adminsList.filter(a => a.email.toLowerCase() !== admin.email.toLowerCase());
                                         setAdminsList(nextAdmins);
-                                        if (spreadsheetId && token) {
-                                          await saveAdminsSheet(spreadsheetId, token, nextAdmins);
-                                        }
+                                        await runSheetSync(async () => {
+                                          await saveAdminsSheet(spreadsheetId!, token!, nextAdmins);
+                                        });
                                         await logAdminAction('Revoked Super Admin', admin.email);
                                         alert(`Authority successfully revoked from ${admin.email}`);
                                       }

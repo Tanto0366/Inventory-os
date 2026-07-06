@@ -8,6 +8,7 @@ interface SyncStatusProps {
   isSyncing: boolean;
   onSync: () => void;
   isAdmin?: boolean;
+  syncError?: string | null;
 }
 
 export default function SyncStatus({
@@ -16,8 +17,31 @@ export default function SyncStatus({
   lastSync,
   isSyncing,
   onSync,
-  isAdmin
+  isAdmin,
+  syncError
 }: SyncStatusProps) {
+  if (syncError) {
+    return (
+      <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs md:text-sm">
+        <div className="flex items-center gap-2">
+          <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+          <span className="font-semibold text-amber-900 font-display">Local Mode (Sheets Sync Offline)</span>
+        </div>
+        <p className="text-[11px] text-amber-700 leading-none">
+          Operating offline. Edits are saved locally and will sync when connection restores.
+        </p>
+        <button
+          onClick={onSync}
+          disabled={isSyncing}
+          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-700 border border-amber-300 rounded-lg text-xs font-medium transition active:scale-95 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+          {isSyncing ? 'Retrying...' : 'Retry Sync'}
+        </button>
+      </div>
+    );
+  }
+
   if (!spreadsheetId) {
     return (
       <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs font-medium">
