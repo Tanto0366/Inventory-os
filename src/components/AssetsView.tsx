@@ -41,6 +41,7 @@ export default function AssetsView({
       const q = searchQuery.toLowerCase();
       const match = 
         a.serial.toLowerCase().includes(q) ||
+        (a.boxId || '').toLowerCase().includes(q) ||
         a.name.toLowerCase().includes(q) ||
         a.brand.toLowerCase().includes(q) ||
         a.desc.toLowerCase().includes(q) ||
@@ -216,6 +217,7 @@ export default function AssetsView({
                 <th className="p-4">Item Name</th>
                 <th className="p-4">Brand / Desc</th>
                 <th className="p-4">Serial Number</th>
+                <th className="p-4">Box ID</th>
                 <th className="p-4">Location</th>
                 <th className="p-4">Owner</th>
                 <th className="p-4">Possessor</th>
@@ -253,6 +255,9 @@ export default function AssetsView({
                     </td>
                     <td className="p-4 font-mono font-bold text-[#6C5CE7] bg-[#F1F3F5] border-x border-[#E9ECEF] text-[11px] px-2.5 py-1 rounded inline-block my-2.5">
                       {asset.serial}
+                    </td>
+                    <td className="p-4 font-mono font-semibold text-[#2D3436] text-[11px] whitespace-nowrap">
+                      {asset.boxId || '—'}
                     </td>
                     <td className="p-4 font-semibold text-[#2D3436]">
                       {asset.city}
@@ -306,7 +311,7 @@ export default function AssetsView({
 
               {filteredAssets.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="p-12 text-center">
+                  <td colSpan={12} className="p-12 text-center">
                     <p className="text-[#636E72] font-medium mb-1 text-sm">No assets match the active filters</p>
                     <p className="text-xs text-[#ADB5BD]">Try modifying your query or filters</p>
                   </td>

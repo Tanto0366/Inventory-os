@@ -2,6 +2,7 @@ export interface Asset {
   sn: number;
   assetId: string;
   serial: string;
+  boxId?: string;
   name: string;
   desc: string;
   brand: string;

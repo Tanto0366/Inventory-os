@@ -158,6 +158,7 @@ export default function App() {
   const [assetForm, setAssetForm] = useState({
     name: '',
     serial: '',
+    boxId: '',
     brand: '',
     desc: '',
     qty: 1,
@@ -252,19 +253,18 @@ export default function App() {
         setUser(user);
         setToken(token);
         setNeedsAuth(false);
-        triggerSheetsSync(token).then(() => {
-          const log = {
-            timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-            action: 'Session Restored',
-            targetEmail: user.email,
-            performedBy: user.email
-          };
-          setAdminLogs(prev => [log, ...prev]);
-          findSpreadsheet(token).then(id => {
-            if (id) {
-              appendAdminLog(id, token, log);
-            }
-          });
+        const log = {
+          timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+          action: 'Session Restored',
+          targetEmail: user.email,
+          performedBy: user.email
+        };
+        setAdminLogs(prev => [log, ...prev]);
+        findSpreadsheet(token).then(id => {
+          if (id) {
+            setSpreadsheetId(id);
+            setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
+          }
         });
       },
       () => {
@@ -283,7 +283,6 @@ export default function App() {
         setUser(result.user);
         setToken(result.accessToken);
         setNeedsAuth(false);
-        await triggerSheetsSync(result.accessToken);
 
         const log = {
           timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
@@ -294,7 +293,8 @@ export default function App() {
         setAdminLogs(prev => [log, ...prev]);
         const id = await findSpreadsheet(result.accessToken);
         if (id) {
-          await appendAdminLog(id, result.accessToken, log);
+          setSpreadsheetId(id);
+          setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
         }
       }
     } catch (err: any) {
@@ -369,33 +369,34 @@ export default function App() {
     setIsSyncing(true);
     setSyncError(null);
     try {
-      let sheetId = await findSpreadsheet(activeToken);
-      let data;
+      let sheetId = spreadsheetId || await findSpreadsheet(activeToken);
       if (!sheetId) {
-        // Provision a new sheets database
-        data = await createAndProvisionSpreadsheet(activeToken);
+        // Provision a new sheets database with current local data
+        const data = await createAndProvisionSpreadsheet(activeToken);
         setSpreadsheetId(data.spreadsheetId);
         setSpreadsheetUrl(data.spreadsheetUrl);
       } else {
-        // Load data from existing spreadsheet
         setSpreadsheetId(sheetId);
         setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
-        data = await loadSpreadsheetData(sheetId, activeToken);
+        // If local assets exist, push local state to spreadsheet; if empty, load from spreadsheet
+        if (assets.length > 0) {
+          await saveAssetsSheet(sheetId, activeToken, assets);
+          await saveCampaignsSheet(sheetId, activeToken, campaigns);
+          await saveAdminsSheet(sheetId, activeToken, adminsList);
+        } else {
+          const data = await loadSpreadsheetData(sheetId, activeToken);
+          setAssets(data.assets);
+          setGatePasses(data.gatePasses);
+          setAuditLogs(data.auditLogs);
+          setCampaigns(data.campaigns);
+          setOwners(data.owners);
+          setPossessors(data.possessors);
+          setLocations(data.locations);
+          if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+          if (data.adminLogs) setAdminLogs(data.adminLogs);
+        }
       }
 
-      setAssets(data.assets);
-      setGatePasses(data.gatePasses);
-      setAuditLogs(data.auditLogs);
-      setCampaigns(data.campaigns);
-      setOwners(data.owners);
-      setPossessors(data.possessors);
-      setLocations(data.locations);
-      if (data.admins && data.admins.length > 0) {
-        setAdminsList(data.admins);
-      }
-      if (data.adminLogs) {
-        setAdminLogs(data.adminLogs);
-      }
       setLastSync(new Date());
       setSyncError(null);
     } catch (e: any) {
@@ -466,6 +467,7 @@ export default function App() {
       sn: assets.length + 1,
       assetId: nextAssetId,
       serial: cleanedSerial,
+      boxId: assetForm.boxId ? assetForm.boxId.trim() : '—',
       name: assetForm.name,
       brand: assetForm.brand,
       desc: assetForm.desc,
@@ -487,15 +489,12 @@ export default function App() {
     setAssets(nextAssets);
     setAddAssetOpen(false);
 
-    // Sync sheet
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, nextAssets);
-      await logTransaction(cleanedSerial, 'Status', '—', newAsset.status, 'Asset Registration');
-    });
+    // Log transaction locally
+    await logTransaction(cleanedSerial, 'Status', '—', newAsset.status, 'Asset Registration');
 
     // Reset Form
     setAssetForm({
-      name: '', serial: '', brand: '', desc: '', qty: 1, city: 'Bangalore',
+      name: '', serial: '', boxId: '', brand: '', desc: '', qty: 1, city: 'Bangalore',
       owner: '', possessor: '', status: 'In House', campaign: '',
       receivedBy: '', receivedOn: new Date().toISOString().split('T')[0]
     });
@@ -508,6 +507,7 @@ export default function App() {
     setAssetForm({
       name: a.name,
       serial: a.serial,
+      boxId: a.boxId || '',
       brand: a.brand,
       desc: a.desc,
       qty: a.qty,
@@ -532,6 +532,7 @@ export default function App() {
         return {
           ...a,
           name: assetForm.name,
+          boxId: assetForm.boxId ? assetForm.boxId.trim() : '—',
           brand: assetForm.brand,
           desc: assetForm.desc,
           qty: assetForm.qty,
@@ -551,41 +552,35 @@ export default function App() {
     setAssets(updatedAssets);
     setEditAssetOpen(false);
 
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, updatedAssets);
-      
-      // Log any key audits
-      if (original.status !== assetForm.status) {
-        await logTransaction(editingSerial, 'Status', original.status, assetForm.status, 'Details update');
-      }
-      if (original.possessor !== assetForm.possessor) {
-        await logTransaction(editingSerial, 'Possessor', original.possessor, assetForm.possessor, 'Details update');
-      }
-      if (original.city !== assetForm.city) {
-        await logTransaction(editingSerial, 'Location', original.city, assetForm.city, 'Details update');
-      }
-    });
+    // Log any key audits
+    if (original.status !== assetForm.status) {
+      await logTransaction(editingSerial, 'Status', original.status, assetForm.status, 'Details update');
+    }
+    if (original.possessor !== assetForm.possessor) {
+      await logTransaction(editingSerial, 'Possessor', original.possessor, assetForm.possessor, 'Details update');
+    }
+    if (original.city !== assetForm.city) {
+      await logTransaction(editingSerial, 'Location', original.city, assetForm.city, 'Details update');
+    }
+    if (original.boxId !== assetForm.boxId) {
+      await logTransaction(editingSerial, 'Box ID', original.boxId || '—', assetForm.boxId || '—', 'Details update');
+    }
+
     setEditingSerial(null);
   };
 
   const handleDeleteAsset = async (serial: string) => {
     const updated = assets.filter(a => a.serial !== serial);
     setAssets(updated);
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, updated);
-      await logTransaction(serial, 'Deleted', 'Active', 'Archived', 'Removal');
-    });
+    await logTransaction(serial, 'Deleted', 'Active', 'Archived', 'Removal');
   };
 
   const handleBulkDelete = async (serials: string[]) => {
     const updated = assets.filter(a => !serials.includes(a.serial));
     setAssets(updated);
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, updated);
-      for (const s of serials) {
-        await logTransaction(s, 'Deleted', 'Active', 'Archived', 'Bulk deletion');
-      }
-    });
+    for (const s of serials) {
+      await logTransaction(s, 'Deleted', 'Active', 'Archived', 'Bulk deletion');
+    }
   };
 
   // Issue Gate Pass handlers
@@ -635,19 +630,14 @@ export default function App() {
     setGatePasses([newPass, ...gatePasses]);
     setGatePassOpen(false);
 
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, updatedAssets);
-      await appendGatePass(spreadsheetId!, token!, newPass);
-      
-      // Log logs for each asset
-      for (const sn of (Array.from(gpSelectedSerials) as string[])) {
-        const original = assets.find(x => x.serial === sn);
-        await logTransaction(sn, 'Status', original?.status || 'In House', gpForm.newStatus, nextId);
-        if (gpForm.possessor && original?.possessor !== gpForm.possessor) {
-          await logTransaction(sn, 'Possessor', original?.possessor || 'Warehouse', gpForm.possessor, nextId);
-        }
+    // Log logs for each asset
+    for (const sn of (Array.from(gpSelectedSerials) as string[])) {
+      const original = assets.find(x => x.serial === sn);
+      await logTransaction(sn, 'Status', original?.status || 'In House', gpForm.newStatus, nextId);
+      if (gpForm.possessor && original?.possessor !== gpForm.possessor) {
+        await logTransaction(sn, 'Possessor', original?.possessor || 'Warehouse', gpForm.possessor, nextId);
       }
-    });
+    }
 
     // Reset Form
     setGpSelectedSerials(new Set());
@@ -685,6 +675,7 @@ export default function App() {
       const findIndex = (aliases: string[]) => headers.findIndex(h => aliases.includes(h));
 
       const serialIdx = findIndex(['serial', 'serial number', 'serial no', 's/n serial']);
+      const boxIdIdx = findIndex(['box id', 'box', 'box_id', 'boxid', 'box no']);
       const nameIdx = findIndex(['item', 'item name', 'name']);
       const brandIdx = findIndex(['brand']);
       const descIdx = findIndex(['description', 'desc', 'model']);
@@ -706,6 +697,7 @@ export default function App() {
           sn: assets.length + i + 1,
           assetId: `AST-${String(assets.length + i + 1).padStart(6, '0')}`,
           serial,
+          boxId: boxIdIdx !== -1 ? String(r[boxIdIdx] || '').trim() : '—',
           name: String(r[nameIdx] || ''),
           brand: brandIdx !== -1 ? String(r[brandIdx] || '') : '',
           desc: descIdx !== -1 ? String(r[descIdx] || '') : '',
@@ -750,12 +742,10 @@ export default function App() {
     setAssets(nextAssetsList);
     setImportPreviewOpen(false);
 
-    await runSheetSync(async () => {
-      await saveAssetsSheet(spreadsheetId!, token!, nextAssetsList);
-      for (const incoming of uniqueIncoming) {
-        await logTransaction(incoming.serial, 'Status', '—', incoming.status, 'XLSX Import');
-      }
-    });
+    for (const incoming of uniqueIncoming) {
+      await logTransaction(incoming.serial, 'Status', '—', incoming.status, 'XLSX Import');
+    }
+
     alert(`Imported ${uniqueIncoming.length} unique assets successfully!`);
     setPendingImportData([]);
   };
@@ -766,12 +756,12 @@ export default function App() {
 
     // 1. Assets Sheet
     const assetsHeaders = [
-      'Asset ID', 'Serial Number', 'Item Name', 'Brand', 'Model/Description', 
+      'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Model/Description', 
       'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 'Status', 
       'Received By', 'Received On', 'Shipping To', 'Shipping Date'
     ];
     const assetsData = assets.map(a => [
-      a.assetId, a.serial, a.name, a.brand, a.desc, a.qty, a.city, a.owner, 
+      a.assetId, a.serial, a.boxId || '—', a.name, a.brand, a.desc, a.qty, a.city, a.owner, 
       a.possessor, a.campaign, a.status, a.receivedBy, a.receivedOn, a.shippingTo, a.shippingDate
     ]);
     const wsAssets = XLSX.utils.aoa_to_sheet([assetsHeaders, ...assetsData]);
@@ -1470,6 +1460,17 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-xs font-semibold text-[#636E72] mb-1">Box ID</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. BOX-101"
+                    value={assetForm.boxId}
+                    onChange={(e) => setAssetForm({...assetForm, boxId: e.target.value})}
+                    className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none font-mono uppercase transition"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-semibold text-[#636E72] mb-1">Brand</label>
                   <input 
                     type="text" 
@@ -1592,7 +1593,7 @@ export default function App() {
                 onClick={handleSaveAsset}
                 className="px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition cursor-pointer"
               >
-                Save & Sync
+                Save Asset
               </button>
             </div>
 
@@ -1632,7 +1633,7 @@ export default function App() {
                 </div>
                 
                 <div className="text-[10px] text-[#636E72] font-sans font-medium">
-                  {assetForm.name} — {assetForm.brand}
+                  {assetForm.name} — {assetForm.brand} {assetForm.boxId ? `(Box: ${assetForm.boxId})` : ''}
                 </div>
 
                 <button
@@ -1684,6 +1685,16 @@ export default function App() {
                     value={assetForm.serial}
                     disabled
                     className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs bg-[#F1F3F5] text-[#636E72] font-mono uppercase outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#636E72] mb-1">Box ID</label>
+                  <input 
+                    type="text" 
+                    value={assetForm.boxId}
+                    onChange={(e) => setAssetForm({...assetForm, boxId: e.target.value})}
+                    className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none font-mono uppercase transition"
                   />
                 </div>
 
@@ -1805,7 +1816,7 @@ export default function App() {
                 onClick={handleUpdateAsset}
                 className="px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition cursor-pointer"
               >
-                Update & Sync
+                Save Changes
               </button>
             </div>
 

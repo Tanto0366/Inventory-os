@@ -36,7 +36,7 @@ export interface SheetData {
 // Helpers for headers
 const HEADERS = {
   'Assets Database': [
-    'Asset ID', 'Serial Number', 'Item Name', 'Brand', 'Model', 'Description', 
+    'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Model', 'Description', 
     'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
     'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
     'Created Date', 'Last Updated'
@@ -403,6 +403,7 @@ function mapAssetToRow(a: Asset): any[] {
   return [
     a.assetId || '',
     a.serial || '',
+    a.boxId || '',
     a.name || '',
     a.brand || '',
     a.desc || '',
@@ -467,27 +468,107 @@ function mapCampaignToRow(c: Campaign): any[] {
 // Parser Utilities
 function parseRowsToAssets(rows: any[][]): Asset[] {
   if (rows.length <= 1) return [];
+  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const boxIdIdx = headerRow.indexOf('box id');
+
   const body = rows.slice(1);
-  return body.map((r, i) => ({
-    sn: i + 1,
-    assetId: String(r[0] || ''),
-    serial: String(r[1] || ''),
-    name: String(r[2] || ''),
-    brand: String(r[3] || ''),
-    desc: String(r[4] || ''),
-    qty: parseInt(r[5]) || 1,
-    city: String(r[6] || ''),
-    owner: String(r[7] || ''),
-    possessor: String(r[8] || ''),
-    campaign: String(r[9] || ''),
-    status: String(r[10] || ''),
-    receivedBy: String(r[11] || ''),
-    receivedOn: String(r[12] || ''),
-    shippingTo: String(r[13] || ''),
-    shippingDate: String(r[14] || ''),
-    createdDate: String(r[15] || ''),
-    lastUpdated: String(r[16] || '')
-  })).filter(a => a.serial && a.name);
+  return body.map((r, i) => {
+    // Check if column 2 is boxId or if boxId exists
+    const hasBoxHeader = boxIdIdx !== -1;
+    let boxId = '';
+    let name = '';
+    let brand = '';
+    let desc = '';
+    let qty = 1;
+    let city = '';
+    let owner = '';
+    let possessor = '';
+    let campaign = '';
+    let status = '';
+    let receivedBy = '';
+    let receivedOn = '';
+    let shippingTo = '';
+    let shippingDate = '';
+    let createdDate = '';
+    let lastUpdated = '';
+
+    if (hasBoxHeader) {
+      boxId = String(r[boxIdIdx] || '');
+      name = String(r[2] || '');
+      brand = String(r[3] || '');
+      desc = String(r[4] || '');
+      qty = parseInt(r[5]) || 1;
+      city = String(r[6] || '');
+      owner = String(r[7] || '');
+      possessor = String(r[8] || '');
+      campaign = String(r[9] || '');
+      status = String(r[10] || '');
+      receivedBy = String(r[11] || '');
+      receivedOn = String(r[12] || '');
+      shippingTo = String(r[13] || '');
+      shippingDate = String(r[14] || '');
+      createdDate = String(r[15] || '');
+      lastUpdated = String(r[16] || '');
+    } else if (r.length >= 18) {
+      // 18+ columns means Box ID is inserted at index 2
+      boxId = String(r[2] || '');
+      name = String(r[3] || '');
+      brand = String(r[4] || '');
+      desc = String(r[5] || '');
+      qty = parseInt(r[6]) || 1;
+      city = String(r[7] || '');
+      owner = String(r[8] || '');
+      possessor = String(r[9] || '');
+      campaign = String(r[10] || '');
+      status = String(r[11] || '');
+      receivedBy = String(r[12] || '');
+      receivedOn = String(r[13] || '');
+      shippingTo = String(r[14] || '');
+      shippingDate = String(r[15] || '');
+      createdDate = String(r[16] || '');
+      lastUpdated = String(r[17] || '');
+    } else {
+      // Legacy format without Box ID
+      boxId = '';
+      name = String(r[2] || '');
+      brand = String(r[3] || '');
+      desc = String(r[4] || '');
+      qty = parseInt(r[5]) || 1;
+      city = String(r[6] || '');
+      owner = String(r[7] || '');
+      possessor = String(r[8] || '');
+      campaign = String(r[9] || '');
+      status = String(r[10] || '');
+      receivedBy = String(r[11] || '');
+      receivedOn = String(r[12] || '');
+      shippingTo = String(r[13] || '');
+      shippingDate = String(r[14] || '');
+      createdDate = String(r[15] || '');
+      lastUpdated = String(r[16] || '');
+    }
+
+    return {
+      sn: i + 1,
+      assetId: String(r[0] || ''),
+      serial: String(r[1] || ''),
+      boxId,
+      name,
+      brand,
+      desc,
+      qty,
+      city,
+      owner,
+      possessor,
+      campaign,
+      status,
+      receivedBy,
+      receivedOn,
+      shippingTo,
+      shippingDate,
+      createdDate,
+      lastUpdated
+    };
+  }).filter(a => a.serial && a.name);
 }
 
 function parseRowsToGatePasses(rows: any[][]): GatePass[] {
