@@ -23,16 +23,18 @@ import {
   RefreshCw, 
   SlidersHorizontal, 
   History, 
-  UserPlus 
+  UserPlus,
+  Navigation
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog } from './types';
+import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment, ShipmentAssetItem } from './types';
 import { initAuth, googleSignIn, logout, getAccessToken } from './lib/firebase';
 import { 
   findSpreadsheet, 
   createAndProvisionSpreadsheet, 
   loadSpreadsheetData, 
   saveAssetsSheet, 
+  saveShipmentsSheet,
   appendGatePass, 
   appendAuditLog,
   saveCampaignsSheet,
@@ -46,6 +48,7 @@ import SyncStatus from './components/SyncStatus';
 import DashboardView from './components/DashboardView';
 import AssetsView from './components/AssetsView';
 import GatePassesView from './components/GatePassesView';
+import { ShipmentsView } from './components/ShipmentsView';
 import AuditTrailView from './components/AuditTrailView';
 import CampaignsView from './components/CampaignsView';
 
@@ -79,6 +82,14 @@ export default function App() {
       if (stored) return JSON.parse(stored);
     } catch {}
     return getSampleSheetData().gatePasses;
+  });
+
+  const [shipments, setShipments] = useState<Shipment[]>(() => {
+    try {
+      const stored = localStorage.getItem('inventory_os_shipments');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return getSampleSheetData().shipments;
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>(() => {
@@ -122,7 +133,7 @@ export default function App() {
   });
 
   // Navigation / UI state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'assets' | 'gatepasses' | 'timeline' | 'audit' | 'campaigns' | 'import' | 'superadmin'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'assets' | 'shipments' | 'gatepasses' | 'timeline' | 'audit' | 'campaigns' | 'import' | 'superadmin'>('dashboard');
   
   const [adminsList, setAdminsList] = useState<AdminUser[]>(() => {
     try {
@@ -203,6 +214,12 @@ export default function App() {
       localStorage.setItem('inventory_os_gatepasses', JSON.stringify(gatePasses));
     } catch {}
   }, [gatePasses]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventory_os_shipments', JSON.stringify(shipments));
+    } catch {}
+  }, [shipments]);
 
   useEffect(() => {
     try {
@@ -381,11 +398,13 @@ export default function App() {
         // If local assets exist, push local state to spreadsheet; if empty, load from spreadsheet
         if (assets.length > 0) {
           await saveAssetsSheet(sheetId, activeToken, assets);
+          await saveShipmentsSheet(sheetId, activeToken, shipments);
           await saveCampaignsSheet(sheetId, activeToken, campaigns);
           await saveAdminsSheet(sheetId, activeToken, adminsList);
         } else {
           const data = await loadSpreadsheetData(sheetId, activeToken);
           setAssets(data.assets);
+          if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
           setGatePasses(data.gatePasses);
           setAuditLogs(data.auditLogs);
           setCampaigns(data.campaigns);
@@ -626,8 +645,83 @@ export default function App() {
       return a;
     });
 
+    // Auto-create linked Shipment Record
+    const shipmentId = `SHIP-${String(shipments.length + 1).padStart(3, '0')}`;
+    const selectedAssetObjects = assets.filter(a => gpSelectedSerials.has(a.serial));
+    const shipmentAssets: ShipmentAssetItem[] = selectedAssetObjects.map(a => ({
+      serial: a.serial,
+      boxId: a.boxId || '—',
+      name: a.name,
+      brand: a.brand,
+      qty: a.qty || 1,
+      status: gpForm.newStatus || 'In Transit',
+      received: false,
+      returned: false
+    }));
+
+    const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const todayYMD = new Date().toISOString().split('T')[0];
+
+    const newShipment: Shipment = {
+      id: shipmentId,
+      gatePassId: nextId,
+      status: 'Dispatched',
+      type: gpForm.type === 'outbound' ? 'Campaign Dispatch' : 'Internal Movement',
+      priority: 'Medium',
+      origin: gpForm.origin,
+      destination: gpForm.dest,
+      currentLocation: gpForm.origin,
+      campaign: selectedAssetObjects[0]?.campaign || 'General',
+      event: gpForm.notes || 'Gate Pass Asset Movement',
+      courier: 'AFMV Express Logistics',
+      trackingNumber: `TRK-${Math.floor(100000 + Math.random() * 900000)}`,
+      vehicleNumber: 'KA-01-EQ-9812',
+      driverName: 'Ramesh Kumar',
+      driverContact: '+91 98765 43210',
+      dispatchDate: gpForm.shipDate || todayYMD,
+      expectedDeliveryDate: gpForm.eta || gpForm.shipDate || todayYMD,
+      shipmentOwner: selectedAssetObjects[0]?.owner || 'AFMV',
+      sender: user?.displayName || user?.email || 'Warehouse Admin',
+      receiver: gpForm.receiver || '—',
+      receiverContact: '',
+      currentPossessor: gpForm.possessor || '—',
+      remarks: gpForm.notes || 'Auto-created shipment from Gate Pass.',
+      shippingCost: 2500,
+      insurance: 'Standard Logistics Coverage',
+      packageWeight: `${selectedAssetObjects.length * 2.5} kg`,
+      boxesCount: Math.ceil(selectedAssetObjects.length / 3),
+      totalAssets: selectedAssetObjects.length,
+      deliveredAssetsCount: 0,
+      pendingAssetsCount: selectedAssetObjects.length,
+      returnedAssetsCount: 0,
+      assets: shipmentAssets,
+      timeline: [
+        {
+          id: `T1-${Date.now()}`,
+          timestamp: nowStr,
+          title: 'Gate Pass Approved & Shipment Created',
+          status: 'Approved',
+          location: gpForm.origin,
+          description: `Gate Pass ${nextId} issued for ${selectedAssetObjects.length} assets. Auto-generated Shipment ${shipmentId}.`,
+          performedBy: user?.email || 'System'
+        },
+        {
+          id: `T2-${Date.now()}`,
+          timestamp: nowStr,
+          title: 'Dispatched in Transit',
+          status: 'Dispatched',
+          location: gpForm.origin,
+          description: `Dispatched from ${gpForm.origin} to ${gpForm.dest} via AFMV Express.`,
+          performedBy: user?.email || 'System'
+        }
+      ],
+      createdDate: todayYMD,
+      lastUpdated: nowStr
+    };
+
     setAssets(updatedAssets);
     setGatePasses([newPass, ...gatePasses]);
+    setShipments(prev => [newShipment, ...prev]);
     setGatePassOpen(false);
 
     // Log logs for each asset
@@ -980,11 +1074,30 @@ export default function App() {
 
               <button 
                 onClick={() => { setActiveTab('gatepasses'); setMobileMenuOpen(false); }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
                   activeTab === 'gatepasses' ? 'bg-[#6C5CE7] text-white' : 'text-[#636E72] hover:bg-[#F8F9FA] hover:text-[#2D3436]'
                 }`}
               >
-                <Truck className="w-4 h-4 shrink-0" /> Gate Passes
+                <div className="flex items-center gap-3">
+                  <Truck className="w-4 h-4 shrink-0" /> Gate Passes
+                </div>
+                <span className={`text-[10px] font-mono rounded-full px-2 py-0.5 ${activeTab === 'gatepasses' ? 'bg-white/20 text-white' : 'bg-[#F1F3F5] text-[#636E72]'}`}>
+                  {gatePasses.length}
+                </span>
+              </button>
+
+              <button 
+                onClick={() => { setActiveTab('shipments'); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
+                  activeTab === 'shipments' ? 'bg-[#6C5CE7] text-white' : 'text-[#636E72] hover:bg-[#F8F9FA] hover:text-[#2D3436]'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Navigation className="w-4 h-4 shrink-0" /> Shipment Tracker
+                </div>
+                <span className={`text-[10px] font-mono rounded-full px-2 py-0.5 ${activeTab === 'shipments' ? 'bg-white/20 text-white' : 'bg-[#F1F3F5] text-[#636E72]'}`}>
+                  {shipments.length}
+                </span>
               </button>
 
               <button 
@@ -1044,6 +1157,7 @@ export default function App() {
                 {activeTab === 'dashboard' && 'Executive Summary'}
                 {activeTab === 'assets' && 'Assets Ledger Registry'}
                 {activeTab === 'gatepasses' && 'Gate Pass Dispatches'}
+                {activeTab === 'shipments' && 'Shipment Tracking Ledger'}
                 {activeTab === 'audit' && 'System Audit Trail'}
                 {activeTab === 'campaigns' && 'Client Campaigns'}
                 {activeTab === 'import' && 'XLSX Spreadsheet Importer'}
@@ -1053,6 +1167,7 @@ export default function App() {
                 {activeTab === 'dashboard' && 'Live warehouse statistics, brand ratios, and logs.'}
                 {activeTab === 'assets' && 'Track serial numbers, current locations, and managers.'}
                 {activeTab === 'gatepasses' && 'Issue, download, and review inbound/outbound dispatches.'}
+                {activeTab === 'shipments' && 'Monitor auto-created shipments, couriers, timelines, and proof of delivery.'}
                 {activeTab === 'audit' && 'Track historical updates per asset.'}
                 {activeTab === 'campaigns' && 'Monitor event budgets, schedules, and deployments.'}
                 {activeTab === 'import' && 'Upload existing spreadsheet data with headers validation.'}
@@ -1118,6 +1233,32 @@ export default function App() {
                 gatePasses={gatePasses}
                 assets={assets}
                 onPreviewGatePass={handleOpenPreviewGp}
+              />
+            )}
+
+            {activeTab === 'shipments' && (
+              <ShipmentsView
+                shipments={shipments}
+                setShipments={setShipments}
+                assets={assets}
+                setAssets={setAssets}
+                logTransaction={logTransaction}
+                saveShipmentsSheet={async (updated) => {
+                  if (spreadsheetId && token) {
+                    await runSheetSync(async () => {
+                      await saveShipmentsSheet(spreadsheetId, token, updated);
+                    });
+                  }
+                }}
+                saveAssetsSheet={async (updated) => {
+                  if (spreadsheetId && token) {
+                    await runSheetSync(async () => {
+                      await saveAssetsSheet(spreadsheetId, token, updated);
+                    });
+                  }
+                }}
+                userEmail={user?.email}
+                onOpenGatePassPreview={handleOpenPreviewGp}
               />
             )}
 

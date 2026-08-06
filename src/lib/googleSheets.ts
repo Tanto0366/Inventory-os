@@ -1,10 +1,11 @@
-import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog } from '../types';
+import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment } from '../types';
 
 const DATABASE_NAME = 'InventoryOS_Database';
 
 const REQUIRED_SHEETS = [
   'Dashboard',
   'Assets Database',
+  'Shipment Tracker',
   'Transactions',
   'Campaigns',
   'Owners',
@@ -23,6 +24,7 @@ export interface SheetData {
   spreadsheetId: string;
   spreadsheetUrl: string;
   assets: Asset[];
+  shipments: Shipment[];
   gatePasses: GatePass[];
   auditLogs: AuditEntry[];
   campaigns: Campaign[];
@@ -40,6 +42,14 @@ const HEADERS = {
     'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
     'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
     'Created Date', 'Last Updated'
+  ],
+  'Shipment Tracker': [
+    'Shipment ID', 'Gate Pass ID', 'Status', 'Shipment Type', 'Priority', 'Origin', 'Destination', 
+    'Current Location', 'Campaign', 'Courier', 'Tracking Number', 'Vehicle Number', 
+    'Driver Name', 'Driver Contact', 'Dispatch Date', 'Expected Delivery', 'Actual Delivery', 
+    'Sender', 'Receiver', 'Receiver Contact', 'Possessor', 'Total Assets', 'Delivered Assets', 
+    'Pending Assets', 'Returned Assets', 'Shipping Cost', 'Insurance', 'Weight', 'Boxes', 'Remarks', 
+    'Last Updated', 'Assets JSON', 'Timeline JSON'
   ],
   'Gate Pass': [
     'Gate Pass Number', 'Pass Type', 'Company', 'Serials', 'Origin', 'Destination', 
@@ -84,6 +94,149 @@ const SAMPLE_GATE_PASSES: GatePass[] = [
   { id: 'GP-001', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['PF48LND0', 'PF4954J4'], origin: 'Mumbai', dest: 'Practice Office Delhi', shipDate: '2026-01-09', eta: '2026-02-09', receiver: 'Karan', possessor: 'Karan', newStatus: 'In Transit', notes: 'Lenovo AP Yoga campaign delivery', createdDate: '2026-01-09' },
   { id: 'GP-002', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['5CG5214PHW', '5CG5214PHJ', '5CG5214PJS', '5CD5305K7Z'], origin: 'Kochi', dest: 'Gurgaon - Nodwin office', shipDate: '2026-01-28', eta: '2026-02-01', receiver: 'Aditya', possessor: 'Aditya', newStatus: 'Delivered', notes: 'OMEN Red.Gaming event', createdDate: '2026-01-28' },
   { id: 'GP-003', type: 'inbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['HP-MULTI-6'], origin: 'Chennai', dest: 'Bangalore', shipDate: '2026-01-08', eta: '2026-01-12', receiver: 'Nikhil', possessor: 'Nikhil', newStatus: 'In House', notes: 'Return from Redington Store Activity', createdDate: '2026-01-12' }
+];
+
+export const SAMPLE_SHIPMENTS: Shipment[] = [
+  {
+    id: 'SHIP-001',
+    gatePassId: 'GP-001',
+    status: 'In Transit',
+    type: 'Campaign Dispatch',
+    priority: 'High',
+    origin: 'Mumbai',
+    destination: 'Practice Office Delhi',
+    currentLocation: 'Delhi Hub',
+    campaign: 'Lenovo AP Yoga',
+    event: 'Lenovo AP Yoga campaign delivery',
+    courier: 'Blue Dart Logistics',
+    trackingNumber: 'BD-88492019',
+    vehicleNumber: 'MH-02-DN-4821',
+    driverName: 'Rajesh Sharma',
+    driverContact: '+91 98201 55432',
+    dispatchDate: '2026-01-09',
+    expectedDeliveryDate: '2026-02-09',
+    shipmentOwner: 'Lenovo',
+    sender: 'Karan (Operations)',
+    receiver: 'Practice Office Delhi',
+    receiverContact: '+91 98110 22334',
+    currentPossessor: 'Karan',
+    remarks: 'Handle with care. High-value Yoga 9i laptops.',
+    shippingCost: 3500,
+    insurance: 'Insured (₹3,00,000)',
+    packageWeight: '8.5 kg',
+    boxesCount: 2,
+    totalAssets: 2,
+    deliveredAssetsCount: 0,
+    pendingAssetsCount: 2,
+    returnedAssetsCount: 0,
+    assets: [
+      { serial: 'PF48LND0', boxId: 'BOX-MUM-01', name: 'Laptop', brand: 'Lenovo', qty: 1, status: 'In Transit', received: false },
+      { serial: 'PF4954J4', boxId: 'BOX-MUM-01', name: 'Laptop', brand: 'Lenovo', qty: 1, status: 'In Transit', received: false }
+    ],
+    timeline: [
+      { id: 'T1', timestamp: '2026-01-09 10:00', title: 'Gate Pass Approved', status: 'Approved', location: 'Mumbai HQ', description: 'Gate pass GP-001 approved and shipment record generated.', performedBy: 'System' },
+      { id: 'T2', timestamp: '2026-01-09 11:30', title: 'Packed & Dispatched', status: 'Dispatched', location: 'Mumbai Warehouse', description: 'Handed over to Blue Dart driver Rajesh Sharma.', performedBy: 'Karan' },
+      { id: 'T3', timestamp: '2026-01-10 14:20', title: 'In Transit - Delhi Hub', status: 'In Transit', location: 'Delhi Hub', description: 'Shipment arrived at Delhi distribution center.', performedBy: 'Blue Dart' }
+    ],
+    createdDate: '2026-01-09',
+    lastUpdated: '2026-01-10 14:20'
+  },
+  {
+    id: 'SHIP-002',
+    gatePassId: 'GP-002',
+    status: 'Delivered',
+    type: 'Store Deployment',
+    priority: 'Urgent',
+    origin: 'Kochi',
+    destination: 'Gurgaon - Nodwin office',
+    currentLocation: 'Gurgaon - Nodwin office',
+    campaign: 'Red.Gaming',
+    event: 'OMEN Red.Gaming event',
+    courier: 'DTDC Priority Air',
+    trackingNumber: 'DTDC-7738201',
+    vehicleNumber: 'KL-07-BW-1102',
+    driverName: 'Suresh Kumar',
+    driverContact: '+91 94470 12345',
+    dispatchDate: '2026-01-28',
+    expectedDeliveryDate: '2026-02-01',
+    actualDeliveryDate: '2026-01-31',
+    shipmentOwner: 'Redington',
+    sender: 'Aditya',
+    receiver: 'Aditya (Nodwin Office)',
+    receiverContact: '+91 99000 88776',
+    currentPossessor: 'Aditya',
+    remarks: 'Delivered in good condition and acknowledged by site team.',
+    shippingCost: 5200,
+    insurance: 'Insured (₹5,00,000)',
+    packageWeight: '18 kg',
+    boxesCount: 4,
+    totalAssets: 4,
+    deliveredAssetsCount: 4,
+    pendingAssetsCount: 0,
+    returnedAssetsCount: 0,
+    receiverSignature: 'Aditya (Digitally Signed)',
+    acknowledgedBy: 'Aditya',
+    condition: 'Good / Perfect',
+    assets: [
+      { serial: '5CG5214PHW', boxId: 'BOX-KCH-01', name: 'Laptop', brand: 'OMEN', qty: 1, status: 'Delivered', received: true, receivedDate: '2026-01-31' },
+      { serial: '5CG5214PHJ', boxId: 'BOX-KCH-01', name: 'Laptop', brand: 'OMEN', qty: 1, status: 'Delivered', received: true, receivedDate: '2026-01-31' },
+      { serial: '5CG5214PJS', boxId: 'BOX-KCH-02', name: 'Laptop', brand: 'OMEN', qty: 1, status: 'Delivered', received: true, receivedDate: '2026-01-31' },
+      { serial: '5CD5305K7Z', boxId: 'BOX-KCH-02', name: 'Laptop', brand: 'OMEN', qty: 1, status: 'Delivered', received: true, receivedDate: '2026-01-31' }
+    ],
+    timeline: [
+      { id: 'T1', timestamp: '2026-01-28 09:00', title: 'Gate Pass Approved', status: 'Approved', location: 'Kochi Hub', description: 'Gate pass GP-002 created.', performedBy: 'System' },
+      { id: 'T2', timestamp: '2026-01-28 10:15', title: 'Dispatched via Air', status: 'Dispatched', location: 'Kochi Airport', description: 'Dispatched via DTDC Air Freight.', performedBy: 'Aditya' },
+      { id: 'T3', timestamp: '2026-01-31 16:00', title: 'Delivered & Acknowledged', status: 'Delivered', location: 'Gurgaon Nodwin Office', description: 'Delivered in full and signed by Aditya.', performedBy: 'Aditya' }
+    ],
+    createdDate: '2026-01-28',
+    lastUpdated: '2026-01-31 16:00'
+  },
+  {
+    id: 'SHIP-003',
+    gatePassId: 'GP-003',
+    status: 'Returned',
+    type: 'Return Shipment',
+    priority: 'Medium',
+    origin: 'Chennai',
+    destination: 'Bangalore',
+    currentLocation: 'Bangalore Warehouse',
+    campaign: 'Redington store Activity',
+    event: 'Return from Redington Store Activity',
+    courier: 'AFMV Internal Transport',
+    trackingNumber: 'INT-MAA-BLR-09',
+    vehicleNumber: 'KA-01-MJ-9901',
+    driverName: 'Mani',
+    driverContact: '+91 97410 99887',
+    dispatchDate: '2026-01-08',
+    expectedDeliveryDate: '2026-01-12',
+    actualDeliveryDate: '2026-01-12',
+    shipmentOwner: 'AFMV',
+    sender: 'Chennai Store',
+    receiver: 'Nikhil (Indiranagar WH)',
+    receiverContact: '+91 98860 11223',
+    currentPossessor: 'Nikhil',
+    remarks: 'Returned back to Bangalore stock after store activity.',
+    shippingCost: 1800,
+    insurance: 'Standard',
+    packageWeight: '12 kg',
+    boxesCount: 3,
+    totalAssets: 1,
+    deliveredAssetsCount: 1,
+    pendingAssetsCount: 0,
+    returnedAssetsCount: 1,
+    receiverSignature: 'Nikhil',
+    acknowledgedBy: 'Nikhil',
+    condition: 'Returned in Good Condition',
+    assets: [
+      { serial: 'HP-MULTI-6', boxId: 'BOX-BLR-12', name: 'Laptop', brand: 'HP', qty: 6, status: 'In House', received: true, receivedDate: '2026-01-12', returned: true, returnedDate: '2026-01-12' }
+    ],
+    timeline: [
+      { id: 'T1', timestamp: '2026-01-08 11:00', title: 'Return Initiated', status: 'Return Initiated', location: 'Chennai', description: 'Return shipment initiated for HP multi units.', performedBy: 'Chennai Store' },
+      { id: 'T2', timestamp: '2026-01-12 10:00', title: 'Received & Restocked', status: 'Returned', location: 'Bangalore Warehouse', description: 'Restocked in Indiranagar warehouse by Nikhil.', performedBy: 'Nikhil' }
+    ],
+    createdDate: '2026-01-08',
+    lastUpdated: '2026-01-12 10:00'
+  }
 ];
 
 const SAMPLE_AUDIT: AuditEntry[] = [
@@ -219,6 +372,8 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     { range: 'Dashboard!A1:C14', values: welcomeValues },
     { range: 'Assets Database!A1:R1', values: [HEADERS['Assets Database']] },
     { range: `Assets Database!A2:R${SAMPLE_ASSETS.length + 1}`, values: SAMPLE_ASSETS.map(mapAssetToRow) },
+    { range: 'Shipment Tracker!A1:AG1', values: [HEADERS['Shipment Tracker']] },
+    { range: `Shipment Tracker!A2:AG${SAMPLE_SHIPMENTS.length + 1}`, values: SAMPLE_SHIPMENTS.map(mapShipmentToRow) },
     { range: 'Gate Pass!A1:M1', values: [HEADERS['Gate Pass']] },
     { range: `Gate Pass!A2:M${SAMPLE_GATE_PASSES.length + 1}`, values: SAMPLE_GATE_PASSES.map(mapGatePassToRow) },
     { range: 'Audit Trail!A1:G1', values: [HEADERS['Audit Trail']] },
@@ -242,6 +397,7 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     spreadsheetId,
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
     assets: SAMPLE_ASSETS,
+    shipments: SAMPLE_SHIPMENTS,
     gatePasses: SAMPLE_GATE_PASSES,
     auditLogs: SAMPLE_AUDIT,
     campaigns: SAMPLE_CAMPAIGNS,
@@ -266,7 +422,8 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     'Possessors!A1:C500',
     'Locations!A1:C500',
     'Admin!A1:D500',
-    'Admin!F1:I1000'
+    'Admin!F1:I1000',
+    'Shipment Tracker!A1:AG2000'
   ];
 
   const queryParams = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
@@ -289,11 +446,13 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
   const locations = parseRowsToLocations(valueRanges[6]?.values || []);
   const admins = parseRowsToAdmins(valueRanges[7]?.values || []);
   const adminLogs = parseRowsToAdminLogs(valueRanges[8]?.values || []);
+  const shipments = parseRowsToShipments(valueRanges[9]?.values || []);
 
   return {
     spreadsheetId,
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
     assets,
+    shipments: shipments.length > 0 ? shipments : SAMPLE_SHIPMENTS,
     gatePasses,
     auditLogs,
     campaigns,
@@ -675,6 +834,112 @@ function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
   })).filter(l => l.timestamp);
 }
 
+export function mapShipmentToRow(s: Shipment): any[] {
+  return [
+    s.id || '',
+    s.gatePassId || '',
+    s.status || 'Draft',
+    s.type || 'Campaign Dispatch',
+    s.priority || 'Medium',
+    s.origin || '',
+    s.destination || '',
+    s.currentLocation || '',
+    s.campaign || '',
+    s.courier || '',
+    s.trackingNumber || '',
+    s.vehicleNumber || '',
+    s.driverName || '',
+    s.driverContact || '',
+    s.dispatchDate || '',
+    s.expectedDeliveryDate || '',
+    s.actualDeliveryDate || '',
+    s.sender || '',
+    s.receiver || '',
+    s.receiverContact || '',
+    s.currentPossessor || '',
+    s.totalAssets || 0,
+    s.deliveredAssetsCount || 0,
+    s.pendingAssetsCount || 0,
+    s.returnedAssetsCount || 0,
+    s.shippingCost || 0,
+    s.insurance || '',
+    s.packageWeight || '',
+    s.boxesCount || 1,
+    s.remarks || '',
+    s.lastUpdated || new Date().toISOString(),
+    JSON.stringify(s.assets || []),
+    JSON.stringify(s.timeline || [])
+  ];
+}
+
+export function parseRowsToShipments(rows: any[][]): Shipment[] {
+  if (!rows || rows.length <= 1) return [];
+  const body = rows.slice(1);
+  return body.map(r => {
+    let assets: any[] = [];
+    let timeline: any[] = [];
+    try {
+      assets = JSON.parse(r[31] || '[]');
+    } catch {
+      assets = [];
+    }
+    try {
+      timeline = JSON.parse(r[32] || '[]');
+    } catch {
+      timeline = [];
+    }
+    return {
+      id: String(r[0] || ''),
+      gatePassId: String(r[1] || ''),
+      status: (r[2] || 'In Transit') as any,
+      type: String(r[3] || 'Campaign Dispatch'),
+      priority: (r[4] || 'Medium') as any,
+      origin: String(r[5] || ''),
+      destination: String(r[6] || ''),
+      currentLocation: String(r[7] || ''),
+      campaign: String(r[8] || ''),
+      event: String(r[8] || 'Campaign Event'),
+      courier: String(r[9] || ''),
+      trackingNumber: String(r[10] || ''),
+      vehicleNumber: String(r[11] || ''),
+      driverName: String(r[12] || ''),
+      driverContact: String(r[13] || ''),
+      dispatchDate: String(r[14] || ''),
+      expectedDeliveryDate: String(r[15] || ''),
+      actualDeliveryDate: String(r[16] || ''),
+      sender: String(r[17] || ''),
+      receiver: String(r[18] || ''),
+      receiverContact: String(r[19] || ''),
+      currentPossessor: String(r[20] || ''),
+      shipmentOwner: String(r[20] || 'AFMV'),
+      totalAssets: parseInt(r[21]) || 0,
+      deliveredAssetsCount: parseInt(r[22]) || 0,
+      pendingAssetsCount: parseInt(r[23]) || 0,
+      returnedAssetsCount: parseInt(r[24]) || 0,
+      shippingCost: parseFloat(r[25]) || 0,
+      insurance: String(r[26] || ''),
+      packageWeight: String(r[27] || ''),
+      boxesCount: parseInt(r[28]) || 1,
+      remarks: String(r[29] || ''),
+      lastUpdated: String(r[30] || ''),
+      assets,
+      timeline,
+      createdDate: String(r[14] || new Date().toISOString().split('T')[0])
+    };
+  }).filter(s => s.id);
+}
+
+export async function saveShipmentsSheet(spreadsheetId: string, token: string, shipments: Shipment[]): Promise<void> {
+  const values = shipments.map(mapShipmentToRow);
+  const range = `Shipment Tracker!A2:AG${shipments.length + 100}`;
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
+  await fetch(clearUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  await writeValues(spreadsheetId, token, `Shipment Tracker!A1:AG${shipments.length + 1}`, [HEADERS['Shipment Tracker'], ...values]);
+}
+
 // Save entire Admins list
 export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
   const headers = ['Email', 'Role', 'Granted By', 'Granted On'];
@@ -714,6 +979,7 @@ export function getSampleSheetData(): SheetData {
     spreadsheetId: 'SAMPLE_SPREADSHEET_ID',
     spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/SAMPLE_SPREADSHEET_ID',
     assets: SAMPLE_ASSETS,
+    shipments: SAMPLE_SHIPMENTS,
     gatePasses: SAMPLE_GATE_PASSES,
     auditLogs: SAMPLE_AUDIT,
     campaigns: SAMPLE_CAMPAIGNS,
