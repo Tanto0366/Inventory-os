@@ -34,6 +34,9 @@ export interface GatePass {
   newStatus: string;
   notes: string;
   createdDate?: string;
+  driverName?: string;
+  driverContact?: string;
+  vehicleNumber?: string;
 }
 
 export interface AuditEntry {

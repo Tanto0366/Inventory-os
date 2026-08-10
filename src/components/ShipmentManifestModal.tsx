@@ -16,7 +16,12 @@ export const ShipmentManifestModal: React.FC<ShipmentManifestModalProps> = ({
   if (!shipment) return null;
 
   const handlePrint = () => {
+    const prevTitle = document.title;
+    document.title = `Shipment_Manifest_${shipment.id}`;
     window.print();
+    setTimeout(() => {
+      document.title = prevTitle;
+    }, 1000);
   };
 
   // Find asset full details if needed
@@ -64,7 +69,7 @@ export const ShipmentManifestModal: React.FC<ShipmentManifestModalProps> = ({
         </div>
 
         {/* Printable Document Sheet */}
-        <div className="p-8 sm:p-10 print:p-8 bg-white font-sans">
+        <div id="print-area" className="p-8 sm:p-10 print:p-8 bg-white font-sans">
           
           {/* Header & Logo */}
           <div className="border-b-2 border-slate-900 pb-6 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -105,7 +110,7 @@ export const ShipmentManifestModal: React.FC<ShipmentManifestModalProps> = ({
             </div>
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Vehicle / Driver</div>
-              <div className="text-xs font-bold text-slate-800 truncate">{shipment.driverName || 'In-house Courier'}</div>
+              <div className="text-xs font-bold text-slate-800 truncate">{shipment.driverName || '—'}</div>
               <div className="text-[10px] font-mono text-slate-500">{shipment.vehicleNumber || '—'}</div>
             </div>
           </div>

@@ -42,6 +42,7 @@ import {
   appendAdminLog,
   getSampleSheetData
 } from './lib/googleSheets';
+import { expandAssetsWithQuantities } from './lib/assetUtils';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -71,9 +72,9 @@ export default function App() {
   const [assets, setAssets] = useState<Asset[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_assets');
-      if (stored) return JSON.parse(stored);
+      if (stored) return expandAssetsWithQuantities(JSON.parse(stored));
     } catch {}
-    return getSampleSheetData().assets;
+    return expandAssetsWithQuantities(getSampleSheetData().assets);
   });
 
   const [gatePasses, setGatePasses] = useState<GatePass[]>(() => {
@@ -192,7 +193,10 @@ export default function App() {
     receiver: '',
     possessor: '',
     newStatus: 'In Transit',
-    notes: ''
+    notes: '',
+    driverName: '',
+    driverContact: '',
+    vehicleNumber: ''
   });
   const [gpSelectedSerials, setGpSelectedSerials] = useState<Set<string>>(new Set());
   const [gpAssetSearch, setGpAssetSearch] = useState('');
@@ -476,13 +480,15 @@ export default function App() {
     }
 
     const cleanedSerial = assetForm.serial.trim();
-    if (assets.some(a => a.serial.toLowerCase() === cleanedSerial.toLowerCase())) {
+    const qtyCount = Math.max(1, assetForm.qty || 1);
+
+    if (qtyCount === 1 && assets.some(a => a.serial.toLowerCase() === cleanedSerial.toLowerCase())) {
       alert('An asset with this serial number already exists.');
       return;
     }
 
     const nextAssetId = `AST-${String(assets.length + 1).padStart(6, '0')}`;
-    const newAsset: Asset = {
+    const rawNewAsset: Asset = {
       sn: assets.length + 1,
       assetId: nextAssetId,
       serial: cleanedSerial,
@@ -490,7 +496,7 @@ export default function App() {
       name: assetForm.name,
       brand: assetForm.brand,
       desc: assetForm.desc,
-      qty: assetForm.qty || 1,
+      qty: qtyCount,
       city: assetForm.city,
       owner: assetForm.owner || 'No info',
       possessor: assetForm.possessor || 'Warehouse',
@@ -504,12 +510,17 @@ export default function App() {
       lastUpdated: new Date().toISOString().split('T')[0]
     };
 
-    const nextAssets = [...assets, newAsset];
+    const nextAssets = expandAssetsWithQuantities([...assets, rawNewAsset]);
     setAssets(nextAssets);
     setAddAssetOpen(false);
 
-    // Log transaction locally
-    await logTransaction(cleanedSerial, 'Status', '—', newAsset.status, 'Asset Registration');
+    // Find newly added units and log transactions
+    const addedUnits = nextAssets.filter(item => 
+      !assets.some(existing => existing.serial === item.serial && existing.assetId === item.assetId)
+    );
+    for (const unit of addedUnits) {
+      await logTransaction(unit.serial, 'Status', '—', unit.status, 'Asset Registration');
+    }
 
     // Reset Form
     setAssetForm({
@@ -529,7 +540,7 @@ export default function App() {
       boxId: a.boxId || '',
       brand: a.brand,
       desc: a.desc,
-      qty: a.qty,
+      qty: a.qty || 1,
       city: a.city,
       owner: a.owner,
       possessor: a.possessor,
@@ -546,7 +557,9 @@ export default function App() {
     const original = assets.find(x => x.serial === editingSerial);
     if (!original) return;
 
-    const updatedAssets = assets.map(a => {
+    const qtyCount = Math.max(1, assetForm.qty || 1);
+
+    const updatedRawAssets = assets.map(a => {
       if (a.serial === editingSerial) {
         return {
           ...a,
@@ -554,7 +567,7 @@ export default function App() {
           boxId: assetForm.boxId ? assetForm.boxId.trim() : '—',
           brand: assetForm.brand,
           desc: assetForm.desc,
-          qty: assetForm.qty,
+          qty: qtyCount,
           city: assetForm.city,
           owner: assetForm.owner,
           possessor: assetForm.possessor,
@@ -568,10 +581,11 @@ export default function App() {
       return a;
     });
 
-    setAssets(updatedAssets);
+    const nextAssets = expandAssetsWithQuantities(updatedRawAssets);
+    setAssets(nextAssets);
     setEditAssetOpen(false);
 
-    // Log any key audits
+    // Log key audits
     if (original.status !== assetForm.status) {
       await logTransaction(editingSerial, 'Status', original.status, assetForm.status, 'Details update');
     }
@@ -627,7 +641,10 @@ export default function App() {
       possessor: gpForm.possessor || '—',
       newStatus: gpForm.newStatus,
       notes: gpForm.notes,
-      createdDate: new Date().toISOString().split('T')[0]
+      createdDate: new Date().toISOString().split('T')[0],
+      driverName: gpForm.driverName ? gpForm.driverName.trim() : undefined,
+      driverContact: gpForm.driverContact ? gpForm.driverContact.trim() : undefined,
+      vehicleNumber: gpForm.vehicleNumber ? gpForm.vehicleNumber.trim() : undefined
     };
 
     // Update the statuses of matching serials locally
@@ -675,9 +692,9 @@ export default function App() {
       event: gpForm.notes || 'Gate Pass Asset Movement',
       courier: 'AFMV Express Logistics',
       trackingNumber: `TRK-${Math.floor(100000 + Math.random() * 900000)}`,
-      vehicleNumber: 'KA-01-EQ-9812',
-      driverName: 'Ramesh Kumar',
-      driverContact: '+91 98765 43210',
+      vehicleNumber: gpForm.vehicleNumber ? gpForm.vehicleNumber.trim() : '',
+      driverName: gpForm.driverName ? gpForm.driverName.trim() : '',
+      driverContact: gpForm.driverContact ? gpForm.driverContact.trim() : '',
       dispatchDate: gpForm.shipDate || todayYMD,
       expectedDeliveryDate: gpForm.eta || gpForm.shipDate || todayYMD,
       shipmentOwner: selectedAssetObjects[0]?.owner || 'AFMV',
@@ -738,7 +755,7 @@ export default function App() {
     setGpForm({
       company: 'AFMV Logistics Pvt. Ltd.', type: 'outbound', origin: 'Bangalore', dest: '',
       shipDate: new Date().toISOString().split('T')[0], eta: '', receiver: '', possessor: '',
-      newStatus: 'In Transit', notes: ''
+      newStatus: 'In Transit', notes: '', driverName: '', driverContact: '', vehicleNumber: ''
     });
   };
 
@@ -785,7 +802,7 @@ export default function App() {
         return;
       }
 
-      const parsed: Asset[] = rows.slice(1).map((r, i) => {
+      const parsedRaw: Asset[] = rows.slice(1).map((r, i) => {
         const serial = String(r[serialIdx] || '').trim();
         return {
           sn: assets.length + i + 1,
@@ -807,6 +824,8 @@ export default function App() {
           shippingDate: 'Nil'
         };
       }).filter(item => item.serial && item.name);
+
+      const parsed = expandAssetsWithQuantities(parsedRaw);
 
       if (parsed.length === 0) {
         alert('No valid items containing serials and names were parsed.');
@@ -2071,6 +2090,43 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Optional Driver & Vehicle Info */}
+                  <div className="pt-2 border-t border-[#E9ECEF]">
+                    <span className="text-[11px] font-bold text-[#6C5CE7] uppercase tracking-wider block mb-2">Driver & Vehicle Details (Optional)</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#636E72] mb-1">Driver Name (Optional)</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Rajesh Kumar"
+                          value={gpForm.driverName}
+                          onChange={(e) => setGpForm({...gpForm, driverName: e.target.value})}
+                          className="w-full px-2.5 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#636E72] mb-1">Driver Contact (Optional)</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. +91 98765..."
+                          value={gpForm.driverContact}
+                          onChange={(e) => setGpForm({...gpForm, driverContact: e.target.value})}
+                          className="w-full px-2.5 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[#636E72] mb-1">Vehicle No. (Optional)</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. KA-01-EQ-9812"
+                          value={gpForm.vehicleNumber}
+                          onChange={(e) => setGpForm({...gpForm, vehicleNumber: e.target.value})}
+                          className="w-full px-2.5 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-[#636E72] mb-1">Set New Status after move</label>
                     <select 
@@ -2306,7 +2362,16 @@ export default function App() {
               </button>
               
               <button 
-                onClick={() => window.print()}
+                onClick={() => {
+                  const prevTitle = document.title;
+                  if (previewingGp) {
+                    document.title = `GatePass_${previewingGp.id}_${(previewingGp.company || 'InventoryOS').replace(/[^a-zA-Z0-9]/g, '_')}`;
+                  }
+                  window.print();
+                  setTimeout(() => {
+                    document.title = prevTitle;
+                  }, 1000);
+                }}
                 className="px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-4 h-4" /> Download / Print Gate Pass

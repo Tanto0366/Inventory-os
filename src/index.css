@@ -14,17 +14,42 @@ body {
 }
 
 /* Print Styles */
+@page {
+  size: A4 portrait;
+  margin: 0mm;
+}
+
 @media print {
+  @page {
+    margin: 0mm;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
   }
+
   #print-area, #print-area * {
-    visibility: visible;
+    visibility: visible !important;
   }
+
   #print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 24px 32px !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
   }
 }

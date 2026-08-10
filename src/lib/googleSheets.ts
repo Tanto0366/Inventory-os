@@ -1,4 +1,5 @@
 import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment } from '../types';
+import { expandAssetsWithQuantities } from './assetUtils';
 
 const DATABASE_NAME = 'InventoryOS_Database';
 
@@ -631,7 +632,7 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
   const boxIdIdx = headerRow.indexOf('box id');
 
   const body = rows.slice(1);
-  return body.map((r, i) => {
+  const rawAssets = body.map((r, i) => {
     // Check if column 2 is boxId or if boxId exists
     const hasBoxHeader = boxIdIdx !== -1;
     let boxId = '';
@@ -728,6 +729,8 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
       lastUpdated
     };
   }).filter(a => a.serial && a.name);
+
+  return expandAssetsWithQuantities(rawAssets);
 }
 
 function parseRowsToGatePasses(rows: any[][]): GatePass[] {
@@ -978,7 +981,7 @@ export function getSampleSheetData(): SheetData {
   return {
     spreadsheetId: 'SAMPLE_SPREADSHEET_ID',
     spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/SAMPLE_SPREADSHEET_ID',
-    assets: SAMPLE_ASSETS,
+    assets: expandAssetsWithQuantities(SAMPLE_ASSETS),
     shipments: SAMPLE_SHIPMENTS,
     gatePasses: SAMPLE_GATE_PASSES,
     auditLogs: SAMPLE_AUDIT,
