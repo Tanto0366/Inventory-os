@@ -39,7 +39,7 @@ export interface SheetData {
 // Helpers for headers
 const HEADERS = {
   'Assets Database': [
-    'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Model', 'Description', 
+    'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Description', 
     'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
     'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
     'Created Date', 'Last Updated'
