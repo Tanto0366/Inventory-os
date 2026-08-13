@@ -1046,18 +1046,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sync state and open spreadsheet link */}
-        <div className="hidden md:block">
-          <SyncStatus 
-            spreadsheetId={spreadsheetId}
-            spreadsheetUrl={spreadsheetUrl}
-            lastSync={lastSync}
-            isSyncing={isSyncing}
-            onSync={() => triggerSheetsSync()}
-            isAdmin={isAdmin}
-          />
-        </div>
-
         {/* User profile & controls */}
         <div className="flex items-center gap-3">
           {/* Static Role Badge */}
@@ -1100,18 +1088,6 @@ export default function App() {
           </button>
         </div>
       </header>
-
-      {/* Sync bar on small viewport heights */}
-      <div className="block md:hidden px-4 py-2 border-b border-[#E9ECEF] bg-white">
-        <SyncStatus 
-          spreadsheetId={spreadsheetId}
-          spreadsheetUrl={spreadsheetUrl}
-          lastSync={lastSync}
-          isSyncing={isSyncing}
-          onSync={() => triggerSheetsSync()}
-          isAdmin={isAdmin}
-        />
-      </div>
 
       {/* 2. CORE WORKSPACE LAYOUT */}
       <div className="flex-1 flex flex-col md:flex-row">
@@ -1397,6 +1373,25 @@ export default function App() {
             {isAdmin && activeTab === 'superadmin' && (
               <div className="space-y-6">
                 
+                {/* Google Sheets Sync Widget */}
+                <SyncStatus 
+                  spreadsheetId={spreadsheetId}
+                  spreadsheetUrl={spreadsheetUrl}
+                  lastSync={lastSync}
+                  isSyncing={isSyncing}
+                  onSync={() => triggerSheetsSync()}
+                  isAdmin={isAdmin}
+                  syncError={syncError}
+                  counts={{
+                    assets: assets.length,
+                    gatePasses: gatePasses.length,
+                    shipments: shipments.length,
+                    auditLogs: auditLogs.length,
+                    campaigns: campaigns.length,
+                    admins: adminsList.length
+                  }}
+                />
+
                 {/* 1. TOP ROW: USER MANAGER */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   

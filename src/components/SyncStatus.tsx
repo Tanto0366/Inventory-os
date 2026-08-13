@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
+import { RefreshCw, ExternalLink, CheckCircle, Database, AlertCircle, Table } from 'lucide-react';
 
 interface SyncStatusProps {
   spreadsheetId: string | null;
@@ -9,6 +9,14 @@ interface SyncStatusProps {
   onSync: () => void;
   isAdmin?: boolean;
   syncError?: string | null;
+  counts?: {
+    assets: number;
+    gatePasses: number;
+    shipments: number;
+    auditLogs: number;
+    campaigns: number;
+    admins: number;
+  };
 }
 
 export default function SyncStatus({
@@ -17,80 +25,148 @@ export default function SyncStatus({
   lastSync,
   isSyncing,
   onSync,
-  isAdmin,
-  syncError
+  syncError,
+  counts
 }: SyncStatusProps) {
-  if (syncError) {
-    return (
-      <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs md:text-sm">
-        <div className="flex items-center gap-2">
-          <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-          <span className="font-semibold text-amber-900 font-display">Local Mode (Sheets Sync Offline)</span>
-        </div>
-        <p className="text-[11px] text-amber-700 leading-none">
-          Operating offline. Edits are saved locally and will sync when connection restores.
-        </p>
-        <button
-          onClick={onSync}
-          disabled={isSyncing}
-          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-700 border border-amber-300 rounded-lg text-xs font-medium transition active:scale-95 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-          {isSyncing ? 'Retrying...' : 'Retry Sync'}
-        </button>
-      </div>
-    );
-  }
-
-  if (!spreadsheetId) {
-    return (
-      <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs font-medium">
-        <span>Google Sheet not connected</span>
-        <button
-          onClick={onSync}
-          disabled={isSyncing}
-          className="ml-auto px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium transition disabled:opacity-50"
-        >
-          {isSyncing ? 'Connecting...' : 'Connect now'}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100/80 text-emerald-800 text-xs md:text-sm">
-      <div className="flex items-center gap-2">
-        <CheckCircle className="w-4 height-4 text-emerald-600" />
-        <span className="font-semibold text-emerald-900 font-display">Linked with Google Sheets</span>
+    <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm space-y-5">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E9ECEF]">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+            <Database className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold font-display text-[#2D3436]">Google Sheets Sync Console</h3>
+              {spreadsheetId ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Sync Active
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  Local Mode
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-[#636E72] mt-0.5">
+              Automated two-way synchronization between InventoryOS and Google Sheets database
+            </p>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div className="flex items-center gap-2 shrink-0">
+          {spreadsheetUrl && (
+            <a
+              href={spreadsheetUrl}
+              target="_blank"
+              referrerPolicy="no-referrer"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F8F9FA] hover:bg-[#E9ECEF] text-[#2D3436] border border-[#DEE2E6] rounded-xl text-xs font-bold transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-[#636E72]" /> Open Spreadsheet
+            </a>
+          )}
+          <button
+            onClick={onSync}
+            disabled={isSyncing}
+            className="flex items-center gap-2 px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            {isSyncing ? 'Syncing Sheets...' : 'Sync Sheet Now'}
+          </button>
+        </div>
       </div>
-      
-      {isAdmin && spreadsheetUrl && (
-        <a
-          href={spreadsheetUrl}
-          target="_blank"
-          referrerPolicy="no-referrer"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-medium underline transition"
-        >
-          Open Spreadsheet <ExternalLink className="w-3 h-3" />
-        </a>
+
+      {/* Sync Status Banner / Alert */}
+      {syncError ? (
+        <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <div>
+              <span className="font-bold text-amber-900">Sync Notice: </span>
+              <span>{syncError === 'DEMO_MODE' ? 'Operating in offline demo mode. Click "Sync Sheet Now" to connect your Google account.' : syncError}</span>
+            </div>
+          </div>
+          <button
+            onClick={onSync}
+            disabled={isSyncing}
+            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-[#F8F9FA] border border-[#E9ECEF] text-xs">
+          <div className="flex items-center gap-2 text-[#2D3436]">
+            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <span className="font-semibold">Spreadsheet ID:</span>
+            <span className="font-mono text-[11px] text-[#636E72] bg-white px-2 py-0.5 rounded border border-[#DEE2E6]">
+              {spreadsheetId || 'Not Connected'}
+            </span>
+          </div>
+          <div className="text-[11px] text-[#636E72] font-mono">
+            Last Synced: <span className="font-bold text-[#2D3436]">{lastSync ? lastSync.toLocaleTimeString() : 'Never'}</span>
+          </div>
+        </div>
       )}
 
-      {lastSync && (
-        <span className="text-emerald-600/80 font-mono text-[11px] ml-auto">
-          Last sync: {lastSync.toLocaleTimeString()}
-        </span>
-      )}
+      {/* Collection Row Counters Grid */}
+      {counts && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Assets
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.assets}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
 
-      <button
-        onClick={onSync}
-        disabled={isSyncing}
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium transition active:scale-95 disabled:opacity-50"
-        title="Sync now"
-      >
-        <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-        {isSyncing ? 'Syncing...' : 'Sync Now'}
-      </button>
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Gate Passes
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.gatePasses}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
+
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Shipments
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.shipments}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
+
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Audit Trail
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.auditLogs}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
+
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Campaigns
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.campaigns}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
+
+          <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">
+            <div className="flex items-center justify-center gap-1 text-[#636E72] text-[10px] font-bold uppercase tracking-wider mb-1">
+              <Table className="w-3 h-3 text-[#6C5CE7]" /> Admins
+            </div>
+            <div className="text-lg font-bold font-display text-[#2D3436]">{counts.admins}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Rows Synced</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
