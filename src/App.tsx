@@ -499,9 +499,13 @@ export default function App() {
       by: user?.displayName || 'System',
       note: ref
     };
-    setAuditLogs(prev => [log, ...prev]);
-    await runSheetSync(async (sheetId, activeToken) => {
-      await appendAuditLog(sheetId, activeToken, log);
+    
+    setAuditLogs(prev => {
+      const nextAuditLogs = [log, ...prev];
+      runSheetSync(async (sheetId, activeToken) => {
+        await saveAuditLogsSheet(sheetId, activeToken, nextAuditLogs);
+      });
+      return nextAuditLogs;
     });
   };
 
@@ -784,14 +788,15 @@ export default function App() {
     };
 
     const nextShipments = [newShipment, ...shipments];
+    const nextGatePasses = [newPass, ...gatePasses];
     setAssets(updatedAssets);
-    setGatePasses([newPass, ...gatePasses]);
+    setGatePasses(nextGatePasses);
     setShipments(nextShipments);
     setGatePassOpen(false);
 
     await runSheetSync(async (sheetId, activeToken) => {
       await saveAssetsSheet(sheetId, activeToken, updatedAssets);
-      await appendGatePass(sheetId, activeToken, newPass);
+      await saveGatePassesSheet(sheetId, activeToken, nextGatePasses);
       await saveShipmentsSheet(sheetId, activeToken, nextShipments);
     });
 
@@ -1317,18 +1322,14 @@ export default function App() {
                 setAssets={setAssets}
                 logTransaction={logTransaction}
                 saveShipmentsSheet={async (updated) => {
-                  if (spreadsheetId && token) {
-                    await runSheetSync(async () => {
-                      await saveShipmentsSheet(spreadsheetId, token, updated);
-                    });
-                  }
+                  await runSheetSync(async (sheetId, activeToken) => {
+                    await saveShipmentsSheet(sheetId, activeToken, updated);
+                  });
                 }}
                 saveAssetsSheet={async (updated) => {
-                  if (spreadsheetId && token) {
-                    await runSheetSync(async () => {
-                      await saveAssetsSheet(spreadsheetId, token, updated);
-                    });
-                  }
+                  await runSheetSync(async (sheetId, activeToken) => {
+                    await saveAssetsSheet(sheetId, activeToken, updated);
+                  });
                 }}
                 userEmail={user?.email}
                 onOpenGatePassPreview={handleOpenPreviewGp}
@@ -1433,8 +1434,8 @@ export default function App() {
                         ];
                         
                         setAdminsList(nextAdmins);
-                        await runSheetSync(async () => {
-                          await saveAdminsSheet(spreadsheetId!, token!, nextAdmins);
+                        await runSheetSync(async (sheetId, activeToken) => {
+                          await saveAdminsSheet(sheetId, activeToken, nextAdmins);
                         });
                         await logAdminAction('Granted Super Admin', email);
                         emailInput.value = '';
