@@ -465,22 +465,46 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
   };
 }
 
-// 4. Overwrite/save the entire Assets worksheet or append
+// 4. Overwrite/save the entire Assets worksheet
 export async function saveAssetsSheet(spreadsheetId: string, token: string, assets: Asset[]): Promise<void> {
-  // Overwrite entire A2:R range to match the updated state
   const values = assets.map(mapAssetToRow);
-  
-  // We first clear any potential old values, or overwrite with full array.
-  // Overwriting A2:R with values
-  const range = `Assets Database!A2:R${assets.length + 100}`; // buffer clear
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
-  await fetch(clearUrl, {
+  const range = `Assets Database!A2:R${Math.max(assets.length + 100, 200)}`;
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+  const clearRes = await fetch(clearUrl, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` }
   });
+  if (!clearRes.ok) console.warn('Assets clear range warning:', clearRes.statusText);
 
-  const writeRange = `Assets Database!A2:R${assets.length + 1}`;
-  await writeValues(spreadsheetId, token, writeRange, values);
+  await writeValues(spreadsheetId, token, `Assets Database!A1:R${assets.length + 1}`, [HEADERS['Assets Database'], ...values]);
+}
+
+// Save all Gate Passes
+export async function saveGatePassesSheet(spreadsheetId: string, token: string, gatePasses: GatePass[]): Promise<void> {
+  const values = gatePasses.map(mapGatePassToRow);
+  const range = `Gate Pass!A2:M${Math.max(gatePasses.length + 100, 200)}`;
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+  const clearRes = await fetch(clearUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!clearRes.ok) console.warn('Gate Pass clear range warning:', clearRes.statusText);
+
+  await writeValues(spreadsheetId, token, `Gate Pass!A1:M${gatePasses.length + 1}`, [HEADERS['Gate Pass'], ...values]);
+}
+
+// Save all Audit Logs
+export async function saveAuditLogsSheet(spreadsheetId: string, token: string, auditLogs: AuditEntry[]): Promise<void> {
+  const values = auditLogs.map(mapAuditToRow);
+  const range = `Audit Trail!A2:G${Math.max(auditLogs.length + 100, 200)}`;
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+  const clearRes = await fetch(clearUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!clearRes.ok) console.warn('Audit Trail clear range warning:', clearRes.statusText);
+
+  await writeValues(spreadsheetId, token, `Audit Trail!A1:G${auditLogs.length + 1}`, [HEADERS['Audit Trail'], ...values]);
 }
 
 // 5. Append new Gate Pass
@@ -489,7 +513,7 @@ export async function appendGatePass(spreadsheetId: string, token: string, gp: G
   const range = 'Gate Pass!A2';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
   
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -499,6 +523,9 @@ export async function appendGatePass(spreadsheetId: string, token: string, gp: G
       values: [row]
     })
   });
+  if (!res.ok) {
+    throw new Error(`Failed to append Gate Pass: ${res.status} ${res.statusText}`);
+  }
 }
 
 // 6. Append new Audit Entry
@@ -507,7 +534,7 @@ export async function appendAuditLog(spreadsheetId: string, token: string, log: 
   const range = 'Audit Trail!A2';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
   
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -517,14 +544,19 @@ export async function appendAuditLog(spreadsheetId: string, token: string, log: 
       values: [row]
     })
   });
+  if (!res.ok) {
+    throw new Error(`Failed to append Audit Log: ${res.status} ${res.statusText}`);
+  }
 }
 
 // 7. Sync Campaigns, Owners, Possessors, Locations
 export async function saveCampaignsSheet(spreadsheetId: string, token: string, campaigns: Campaign[]): Promise<void> {
   const values = campaigns.map(mapCampaignToRow);
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Campaigns!A2:H200:clear`;
-  await fetch(clearUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-  await writeValues(spreadsheetId, token, `Campaigns!A2:H${campaigns.length + 1}`, values);
+  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Campaigns!A2:H500:clear`;
+  const clearRes = await fetch(clearUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+  if (!clearRes.ok) console.warn('Campaigns clear warning:', clearRes.statusText);
+
+  await writeValues(spreadsheetId, token, `Campaigns!A1:H${campaigns.length + 1}`, [HEADERS['Campaigns'], ...values]);
 }
 
 // Bulk general batch writer
@@ -542,7 +574,9 @@ async function writeBatchValues(spreadsheetId: string, token: string, updates: {
     },
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('Failed batch update sheet');
+  if (!res.ok) {
+    throw new Error(`Failed batch update sheet: ${res.status} ${res.statusText}`);
+  }
 }
 
 async function writeValues(spreadsheetId: string, token: string, range: string, values: any[][]): Promise<void> {
@@ -555,7 +589,9 @@ async function writeValues(spreadsheetId: string, token: string, range: string, 
     },
     body: JSON.stringify({ values })
   });
-  if (!res.ok) throw new Error(`Failed to write values to range ${range}`);
+  if (!res.ok) {
+    throw new Error(`Failed to write values to range ${range}: ${res.status} ${res.statusText}`);
+  }
 }
 
 // Mapping Utilities

@@ -35,6 +35,8 @@ import {
   loadSpreadsheetData, 
   saveAssetsSheet, 
   saveShipmentsSheet,
+  saveGatePassesSheet,
+  saveAuditLogsSheet,
   appendGatePass, 
   appendAuditLog,
   saveCampaignsSheet,
@@ -270,23 +272,55 @@ export default function App() {
   // Initialize Auth listeners on load
   useEffect(() => {
     initAuth(
-      (user, token) => {
+      async (user, activeToken) => {
         setUser(user);
-        setToken(token);
+        setToken(activeToken);
         setNeedsAuth(false);
+        try {
+          localStorage.setItem('inventory_os_token', activeToken);
+        } catch {}
+
         const log = {
           timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
           action: 'Session Restored',
-          targetEmail: user.email,
-          performedBy: user.email
+          targetEmail: user.email || '',
+          performedBy: user.email || ''
         };
         setAdminLogs(prev => [log, ...prev]);
-        findSpreadsheet(token).then(id => {
+
+        try {
+          let id = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
+          if (!id) {
+            id = await findSpreadsheet(activeToken);
+          }
           if (id) {
             setSpreadsheetId(id);
             setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
+            try {
+              localStorage.setItem('inventory_os_spreadsheet_id', id);
+            } catch {}
+
+            // Load data from spreadsheet on startup if local state is empty
+            const hasLocal = localStorage.getItem('inventory_os_assets');
+            if (!hasLocal) {
+              const data = await loadSpreadsheetData(id, activeToken);
+              if (data.assets && data.assets.length > 0) setAssets(data.assets);
+              if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
+              if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
+              if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
+              if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
+              if (data.owners && data.owners.length > 0) setOwners(data.owners);
+              if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
+              if (data.locations && data.locations.length > 0) setLocations(data.locations);
+              if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+              if (data.adminLogs) setAdminLogs(data.adminLogs);
+            }
+            setLastSync(new Date());
+            setSyncError(null);
           }
-        });
+        } catch (err: any) {
+          console.warn('Initial spreadsheet check warning:', err);
+        }
       },
       () => {
         setNeedsAuth(true);
@@ -304,19 +338,19 @@ export default function App() {
         setUser(result.user);
         setToken(result.accessToken);
         setNeedsAuth(false);
+        try {
+          localStorage.setItem('inventory_os_token', result.accessToken);
+        } catch {}
 
         const log = {
           timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
           action: 'User Signed In',
-          targetEmail: result.user.email,
-          performedBy: result.user.email
+          targetEmail: result.user.email || '',
+          performedBy: result.user.email || ''
         };
         setAdminLogs(prev => [log, ...prev]);
-        const id = await findSpreadsheet(result.accessToken);
-        if (id) {
-          setSpreadsheetId(id);
-          setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
-        }
+
+        await triggerSheetsSync(result.accessToken);
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -369,62 +403,72 @@ export default function App() {
   };
 
   // Helper: Run Google Sheets operation with offline-resilience try/catch wrapper
-  const runSheetSync = async (fn: () => Promise<void>) => {
-    if (spreadsheetId && token) {
-      setIsSyncing(true);
-      try {
-        await fn();
-        setSyncError(null);
-      } catch (e: any) {
-        console.warn('Sheets operation deferred (operating in local-only mode):', e.message || e);
-        setSyncError(e.message || 'Offline');
-      } finally {
-        setIsSyncing(false);
+  const runSheetSync = async (fn: (sheetId: string, activeToken: string) => Promise<void>) => {
+    const activeToken = token || localStorage.getItem('inventory_os_token');
+    if (!activeToken || activeToken === 'DEMO_TOKEN') return;
+
+    setIsSyncing(true);
+    try {
+      let activeSheetId = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
+      if (!activeSheetId) {
+        activeSheetId = await findSpreadsheet(activeToken);
+        if (!activeSheetId) {
+          const data = await createAndProvisionSpreadsheet(activeToken);
+          activeSheetId = data.spreadsheetId;
+        }
+        setSpreadsheetId(activeSheetId);
+        setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${activeSheetId}`);
+        try {
+          localStorage.setItem('inventory_os_spreadsheet_id', activeSheetId);
+        } catch {}
       }
+
+      await fn(activeSheetId, activeToken);
+      setLastSync(new Date());
+      setSyncError(null);
+    } catch (e: any) {
+      console.warn('Sheets operation deferred (operating in local-only mode):', e.message || e);
+      setSyncError(e.message || 'Offline');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   // Sync Google Sheets integration
   const triggerSheetsSync = async (activeToken: string | null = token) => {
-    if (!activeToken) return;
+    const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
+    if (!currentToken || currentToken === 'DEMO_TOKEN') {
+      setSyncError('DEMO_MODE');
+      return;
+    }
     setIsSyncing(true);
     setSyncError(null);
     try {
-      let sheetId = spreadsheetId || await findSpreadsheet(activeToken);
+      let sheetId = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || await findSpreadsheet(currentToken);
       if (!sheetId) {
-        // Provision a new sheets database with current local data
-        const data = await createAndProvisionSpreadsheet(activeToken);
-        setSpreadsheetId(data.spreadsheetId);
-        setSpreadsheetUrl(data.spreadsheetUrl);
-      } else {
-        setSpreadsheetId(sheetId);
-        setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
-        // If local assets exist, push local state to spreadsheet; if empty, load from spreadsheet
-        if (assets.length > 0) {
-          await saveAssetsSheet(sheetId, activeToken, assets);
-          await saveShipmentsSheet(sheetId, activeToken, shipments);
-          await saveCampaignsSheet(sheetId, activeToken, campaigns);
-          await saveAdminsSheet(sheetId, activeToken, adminsList);
-        } else {
-          const data = await loadSpreadsheetData(sheetId, activeToken);
-          setAssets(data.assets);
-          if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
-          setGatePasses(data.gatePasses);
-          setAuditLogs(data.auditLogs);
-          setCampaigns(data.campaigns);
-          setOwners(data.owners);
-          setPossessors(data.possessors);
-          setLocations(data.locations);
-          if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
-          if (data.adminLogs) setAdminLogs(data.adminLogs);
-        }
+        const data = await createAndProvisionSpreadsheet(currentToken);
+        sheetId = data.spreadsheetId;
       }
+
+      setSpreadsheetId(sheetId);
+      setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
+      try {
+        localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
+      } catch {}
+
+      // Save all current local collections to Google Sheets
+      await saveAssetsSheet(sheetId, currentToken, assets);
+      await saveGatePassesSheet(sheetId, currentToken, gatePasses);
+      await saveAuditLogsSheet(sheetId, currentToken, auditLogs);
+      await saveShipmentsSheet(sheetId, currentToken, shipments);
+      await saveCampaignsSheet(sheetId, currentToken, campaigns);
+      await saveAdminsSheet(sheetId, currentToken, adminsList);
 
       setLastSync(new Date());
       setSyncError(null);
     } catch (e: any) {
-      console.warn('Google Sheets Sync is currently offline (operating in Local Mode):', e.message || e);
-      setSyncError(e.message || 'Failed to fetch');
+      console.warn('Google Sheets Sync is currently offline:', e.message || e);
+      setSyncError(e.message || 'Failed to sync with Google Sheets');
     } finally {
       setIsSyncing(false);
     }
@@ -438,13 +482,9 @@ export default function App() {
       performedBy: user?.email || 'System'
     };
     setAdminLogs(prev => [log, ...prev]);
-    if (spreadsheetId && token) {
-      try {
-        await appendAdminLog(spreadsheetId, token, log);
-      } catch (e: any) {
-        console.warn('Deferred appending admin log:', e.message || e);
-      }
-    }
+    await runSheetSync(async (sheetId, activeToken) => {
+      await appendAdminLog(sheetId, activeToken, log);
+    });
   };
 
   // Helper: Create log helper
@@ -459,17 +499,10 @@ export default function App() {
       by: user?.displayName || 'System',
       note: ref
     };
-    
-    // Add local
     setAuditLogs(prev => [log, ...prev]);
-    // Save to Google sheet
-    if (spreadsheetId && token) {
-      try {
-        await appendAuditLog(spreadsheetId, token, log);
-      } catch (e: any) {
-        console.warn('Deferred appending audit log:', e.message || e);
-      }
-    }
+    await runSheetSync(async (sheetId, activeToken) => {
+      await appendAuditLog(sheetId, activeToken, log);
+    });
   };
 
   // Asset action handlers
@@ -513,6 +546,10 @@ export default function App() {
     const nextAssets = expandAssetsWithQuantities([...assets, rawNewAsset]);
     setAssets(nextAssets);
     setAddAssetOpen(false);
+
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAssetsSheet(sheetId, activeToken, nextAssets);
+    });
 
     // Find newly added units and log transactions
     const addedUnits = nextAssets.filter(item => 
@@ -585,6 +622,10 @@ export default function App() {
     setAssets(nextAssets);
     setEditAssetOpen(false);
 
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAssetsSheet(sheetId, activeToken, nextAssets);
+    });
+
     // Log key audits
     if (original.status !== assetForm.status) {
       await logTransaction(editingSerial, 'Status', original.status, assetForm.status, 'Details update');
@@ -605,12 +646,18 @@ export default function App() {
   const handleDeleteAsset = async (serial: string) => {
     const updated = assets.filter(a => a.serial !== serial);
     setAssets(updated);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAssetsSheet(sheetId, activeToken, updated);
+    });
     await logTransaction(serial, 'Deleted', 'Active', 'Archived', 'Removal');
   };
 
   const handleBulkDelete = async (serials: string[]) => {
     const updated = assets.filter(a => !serials.includes(a.serial));
     setAssets(updated);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAssetsSheet(sheetId, activeToken, updated);
+    });
     for (const s of serials) {
       await logTransaction(s, 'Deleted', 'Active', 'Archived', 'Bulk deletion');
     }
@@ -736,10 +783,17 @@ export default function App() {
       lastUpdated: nowStr
     };
 
+    const nextShipments = [newShipment, ...shipments];
     setAssets(updatedAssets);
     setGatePasses([newPass, ...gatePasses]);
-    setShipments(prev => [newShipment, ...prev]);
+    setShipments(nextShipments);
     setGatePassOpen(false);
+
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAssetsSheet(sheetId, activeToken, updatedAssets);
+      await appendGatePass(sheetId, activeToken, newPass);
+      await saveShipmentsSheet(sheetId, activeToken, nextShipments);
+    });
 
     // Log logs for each asset
     for (const sn of (Array.from(gpSelectedSerials) as string[])) {

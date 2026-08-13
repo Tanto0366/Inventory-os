@@ -13,6 +13,10 @@ provider.addScope('https://www.googleapis.com/auth/drive.file');
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
+try {
+  cachedAccessToken = localStorage.getItem('inventory_os_token');
+} catch {}
+
 // Initialize auth state listener. Call this on app load.
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -20,15 +24,18 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      const activeToken = cachedAccessToken || localStorage.getItem('inventory_os_token');
+      if (activeToken) {
+        cachedAccessToken = activeToken;
+        if (onAuthSuccess) onAuthSuccess(user, activeToken);
       } else {
-        // If the user is logged in but we don't have the token in memory,
-        // we might need to trigger login or refresh, or clear cache.
         if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
+      try {
+        localStorage.removeItem('inventory_os_token');
+      } catch {}
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -45,6 +52,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    try {
+      localStorage.setItem('inventory_os_token', credential.accessToken);
+    } catch {}
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -55,10 +65,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  if (cachedAccessToken) return cachedAccessToken;
+  return localStorage.getItem('inventory_os_token');
 };
 
 export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
+  try {
+    localStorage.removeItem('inventory_os_token');
+    localStorage.removeItem('inventory_os_spreadsheet_id');
+  } catch {}
 };
