@@ -76,7 +76,12 @@ export default function App() {
   const [assets, setAssets] = useState<Asset[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_assets');
-      if (stored) return expandAssetsWithQuantities(JSON.parse(stored));
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return expandAssetsWithQuantities(parsed);
+        }
+      }
     } catch {}
     return expandAssetsWithQuantities(getSampleSheetData().assets);
   });
@@ -84,7 +89,10 @@ export default function App() {
   const [gatePasses, setGatePasses] = useState<GatePass[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_gatepasses');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().gatePasses;
   });
@@ -92,7 +100,10 @@ export default function App() {
   const [shipments, setShipments] = useState<Shipment[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_shipments');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().shipments;
   });
@@ -100,7 +111,10 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_auditlogs');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().auditLogs;
   });
@@ -108,7 +122,10 @@ export default function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_campaigns');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().campaigns;
   });
@@ -116,7 +133,10 @@ export default function App() {
   const [owners, setOwners] = useState<Owner[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_owners');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().owners;
   });
@@ -124,7 +144,10 @@ export default function App() {
   const [possessors, setPossessors] = useState<Possessor[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_possessors');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().possessors;
   });
@@ -132,7 +155,10 @@ export default function App() {
   const [locations, setLocations] = useState<LocationInfo[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_locations');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().locations;
   });
@@ -143,7 +169,10 @@ export default function App() {
   const [adminsList, setAdminsList] = useState<AdminUser[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_admins');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().admins;
   });
@@ -151,7 +180,10 @@ export default function App() {
   const [adminLogs, setAdminLogs] = useState<AdminLog[]>(() => {
     try {
       const stored = localStorage.getItem('inventory_os_adminlogs');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return getSampleSheetData().adminLogs;
   });
@@ -302,26 +334,26 @@ export default function App() {
               localStorage.setItem('inventory_os_spreadsheet_id', id);
             } catch {}
 
-            // Load data from spreadsheet on startup if local state is empty
-            const hasLocal = localStorage.getItem('inventory_os_assets');
-            if (!hasLocal) {
-              const data = await loadSpreadsheetData(id, activeToken);
-              if (data.assets && data.assets.length > 0) setAssets(data.assets);
-              if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
-              if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
-              if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
-              if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
-              if (data.owners && data.owners.length > 0) setOwners(data.owners);
-              if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
-              if (data.locations && data.locations.length > 0) setLocations(data.locations);
-              if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
-              if (data.adminLogs) setAdminLogs(data.adminLogs);
+            // Always hydrate data from Google Sheets as the single source of truth
+            const data = await loadSpreadsheetData(id, activeToken);
+            if (data.assets && data.assets.length > 0) {
+              setAssets(expandAssetsWithQuantities(data.assets));
             }
+            if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
+            if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
+            if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
+            if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
+            if (data.owners && data.owners.length > 0) setOwners(data.owners);
+            if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
+            if (data.locations && data.locations.length > 0) setLocations(data.locations);
+            if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+            if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
+
             setLastSync(new Date());
             setSyncError(null);
           }
         } catch (err: any) {
-          console.warn('Initial spreadsheet check warning:', err);
+          console.warn('Initial spreadsheet load warning:', err);
         }
       },
       () => {
@@ -329,6 +361,130 @@ export default function App() {
       }
     );
   }, []);
+
+  // Pull / Load from Google Sheets (Hydration)
+  const pullFromGoogleSheets = async (activeToken: string | null = token, targetSheetId?: string) => {
+    const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
+    if (!currentToken || currentToken === 'DEMO_TOKEN') {
+      setSyncError('DEMO_MODE');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      let sheetId = targetSheetId || spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
+      if (!sheetId) {
+        sheetId = await findSpreadsheet(currentToken);
+      }
+      if (!sheetId) {
+        const created = await createAndProvisionSpreadsheet(currentToken);
+        sheetId = created.spreadsheetId;
+      }
+
+      setSpreadsheetId(sheetId);
+      setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
+      try {
+        localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
+      } catch {}
+
+      const data = await loadSpreadsheetData(sheetId, currentToken);
+
+      if (data.assets && data.assets.length > 0) {
+        setAssets(expandAssetsWithQuantities(data.assets));
+      }
+      if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
+      if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
+      if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
+      if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
+      if (data.owners && data.owners.length > 0) setOwners(data.owners);
+      if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
+      if (data.locations && data.locations.length > 0) setLocations(data.locations);
+      if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+      if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
+
+      setLastSync(new Date());
+      setSyncError(null);
+      return data;
+    } catch (e: any) {
+      console.warn('Pull from Google Sheets failed:', e.message || e);
+      setSyncError(e.message || 'Failed to pull from Google Sheets');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Push / Save to Google Sheets with Safety Guard against empty wipes
+  const pushToGoogleSheets = async (activeToken: string | null = token, force: boolean = false) => {
+    const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
+    if (!currentToken || currentToken === 'DEMO_TOKEN') {
+      setSyncError('DEMO_MODE');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      let sheetId = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
+      if (!sheetId) {
+        sheetId = await findSpreadsheet(currentToken);
+      }
+      if (!sheetId) {
+        const created = await createAndProvisionSpreadsheet(currentToken);
+        sheetId = created.spreadsheetId;
+      }
+
+      setSpreadsheetId(sheetId);
+      setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
+      try {
+        localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
+      } catch {}
+
+      // SAFETY GUARD: Check remote sheet before writing if local assets is empty
+      if (assets.length === 0 && !force) {
+        const remoteData = await loadSpreadsheetData(sheetId, currentToken);
+        if (remoteData.assets && remoteData.assets.length > 0) {
+          // Prevent accidental wiping of the sheet! Hydrate local state instead
+          setAssets(expandAssetsWithQuantities(remoteData.assets));
+          if (remoteData.shipments?.length > 0) setShipments(remoteData.shipments);
+          if (remoteData.gatePasses?.length > 0) setGatePasses(remoteData.gatePasses);
+          if (remoteData.auditLogs?.length > 0) setAuditLogs(remoteData.auditLogs);
+          if (remoteData.campaigns?.length > 0) setCampaigns(remoteData.campaigns);
+          
+          throw new Error(
+            `Safety Guard Triggered: Google Sheet contains ${remoteData.assets.length} assets while local session had 0. Restored local inventory from Google Sheet to prevent data loss.`
+          );
+        }
+      }
+
+      // Execute full database sync
+      await syncFullDatabase(sheetId, currentToken, {
+        assets,
+        shipments,
+        gatePasses,
+        auditLogs,
+        campaigns,
+        admins: adminsList
+      });
+
+      setLastSync(new Date());
+      setSyncError(null);
+    } catch (e: any) {
+      console.warn('Google Sheets push failed:', e.message || e);
+      setSyncError(e.message || 'Failed to push to Google Sheets');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Sync Google Sheets integration (pulls if local empty, otherwise safely pushes)
+  const triggerSheetsSync = async (activeToken: string | null = token) => {
+    if (assets.length === 0) {
+      await pullFromGoogleSheets(activeToken);
+    } else {
+      await pushToGoogleSheets(activeToken);
+    }
+  };
 
   // Handle Sign In Action
   const handleLogin = async () => {
@@ -352,7 +508,8 @@ export default function App() {
         };
         setAdminLogs(prev => [log, ...prev]);
 
-        await triggerSheetsSync(result.accessToken);
+        // Automatically pull & hydrate latest data from Google Sheets upon login
+        await pullFromGoogleSheets(result.accessToken);
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -391,15 +548,25 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    if (window.confirm('Are you sure you want to log out? Your local sync state will be cleared.')) {
+    if (window.confirm('Are you sure you want to log out?')) {
       await logout();
       setUser(null);
       setToken(null);
       setSpreadsheetId(null);
       setSpreadsheetUrl(null);
-      setAssets([]);
-      setGatePasses([]);
-      setAuditLogs([]);
+      try {
+        localStorage.removeItem('inventory_os_token');
+        localStorage.removeItem('inventory_os_spreadsheet_id');
+      } catch {}
+
+      // Reset state cleanly to sample defaults so empty arrays never corrupt localStorage
+      const sample = getSampleSheetData();
+      setAssets(expandAssetsWithQuantities(sample.assets));
+      setGatePasses(sample.gatePasses);
+      setShipments(sample.shipments);
+      setAuditLogs(sample.auditLogs);
+      setCampaigns(sample.campaigns);
+      setAdminsList(sample.admins);
       setNeedsAuth(true);
     }
   };
@@ -431,49 +598,6 @@ export default function App() {
     } catch (e: any) {
       console.warn('Sheets operation deferred (operating in local-only mode):', e.message || e);
       setSyncError(e.message || 'Offline');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  // Sync Google Sheets integration
-  const triggerSheetsSync = async (activeToken: string | null = token) => {
-    const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
-    if (!currentToken || currentToken === 'DEMO_TOKEN') {
-      setSyncError('DEMO_MODE');
-      return;
-    }
-    setIsSyncing(true);
-    setSyncError(null);
-    try {
-      let sheetId = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || await findSpreadsheet(currentToken);
-      if (!sheetId) {
-        const data = await createAndProvisionSpreadsheet(currentToken);
-        sheetId = data.spreadsheetId;
-      }
-
-      setSpreadsheetId(sheetId);
-      setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${sheetId}`);
-      try {
-        localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
-      } catch {}
-
-      // Execute robust multi-step sync:
-      // Verify spreadsheet -> Read metadata -> Ensure all required tabs & headers -> Sync all collections
-      await syncFullDatabase(sheetId, currentToken, {
-        assets,
-        shipments,
-        gatePasses,
-        auditLogs,
-        campaigns,
-        admins: adminsList
-      });
-
-      setLastSync(new Date());
-      setSyncError(null);
-    } catch (e: any) {
-      console.warn('Google Sheets Sync failed:', e.message || e);
-      setSyncError(e.message || 'Failed to sync with Google Sheets');
     } finally {
       setIsSyncing(false);
     }
@@ -1385,6 +1509,8 @@ export default function App() {
                   lastSync={lastSync}
                   isSyncing={isSyncing}
                   onSync={() => triggerSheetsSync()}
+                  onPull={() => pullFromGoogleSheets()}
+                  onPush={() => pushToGoogleSheets()}
                   isAdmin={isAdmin}
                   syncError={syncError}
                   counts={{

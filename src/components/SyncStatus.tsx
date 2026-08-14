@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, ExternalLink, CheckCircle, Database, AlertCircle, Table } from 'lucide-react';
+import { RefreshCw, ExternalLink, CheckCircle, Database, AlertCircle, Table, DownloadCloud, UploadCloud, ShieldAlert } from 'lucide-react';
 
 interface SyncStatusProps {
   spreadsheetId: string | null;
@@ -7,6 +7,8 @@ interface SyncStatusProps {
   lastSync: Date | null;
   isSyncing: boolean;
   onSync: () => void;
+  onPull?: () => void;
+  onPush?: () => void;
   isAdmin?: boolean;
   syncError?: string | null;
   counts?: {
@@ -25,13 +27,15 @@ export default function SyncStatus({
   lastSync,
   isSyncing,
   onSync,
+  onPull,
+  onPush,
   syncError,
   counts
 }: SyncStatusProps) {
   return (
     <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm space-y-5">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E9ECEF]">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#E9ECEF]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
             <Database className="w-5 h-5" />
@@ -52,31 +56,56 @@ export default function SyncStatus({
               )}
             </div>
             <p className="text-xs text-[#636E72] mt-0.5">
-              Automated two-way synchronization between InventoryOS and Google Sheets database
+              Automated two-way synchronization between InventoryOS and Google Sheets database with destructive-wipe prevention
             </p>
           </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           {spreadsheetUrl && (
             <a
               href={spreadsheetUrl}
               target="_blank"
               referrerPolicy="no-referrer"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F8F9FA] hover:bg-[#E9ECEF] text-[#2D3436] border border-[#DEE2E6] rounded-xl text-xs font-bold transition"
+              className="flex items-center gap-1.5 px-3 py-2 bg-[#F8F9FA] hover:bg-[#E9ECEF] text-[#2D3436] border border-[#DEE2E6] rounded-xl text-xs font-bold transition"
             >
-              <ExternalLink className="w-3.5 h-3.5 text-[#636E72]" /> Open Spreadsheet
+              <ExternalLink className="w-3.5 h-3.5 text-[#636E72]" /> Open Sheet
             </a>
           )}
+          
+          {onPull && (
+            <button
+              onClick={onPull}
+              disabled={isSyncing}
+              title="Download and refresh all records from Google Sheets into InventoryOS"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
+            >
+              <DownloadCloud className={`w-3.5 h-3.5 text-emerald-700 ${isSyncing ? 'animate-bounce' : ''}`} />
+              Pull from Sheet
+            </button>
+          )}
+
+          {onPush && (
+            <button
+              onClick={onPush}
+              disabled={isSyncing}
+              title="Save all local records to Google Sheets with safety checks"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-indigo-700" />
+              Push to Sheet
+            </button>
+          )}
+
           <button
             onClick={onSync}
             disabled={isSyncing}
             className="flex items-center gap-2 px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Syncing Sheets...' : 'Sync Sheet Now'}
+            {isSyncing ? 'Syncing...' : 'Sync Sheet Now'}
           </button>
         </div>
       </div>
