@@ -42,6 +42,8 @@ import {
   saveCampaignsSheet,
   saveAdminsSheet,
   appendAdminLog,
+  syncFullDatabase,
+  ensureSpreadsheetSchema,
   getSampleSheetData
 } from './lib/googleSheets';
 import { expandAssetsWithQuantities } from './lib/assetUtils';
@@ -456,18 +458,21 @@ export default function App() {
         localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
       } catch {}
 
-      // Save all current local collections to Google Sheets
-      await saveAssetsSheet(sheetId, currentToken, assets);
-      await saveGatePassesSheet(sheetId, currentToken, gatePasses);
-      await saveAuditLogsSheet(sheetId, currentToken, auditLogs);
-      await saveShipmentsSheet(sheetId, currentToken, shipments);
-      await saveCampaignsSheet(sheetId, currentToken, campaigns);
-      await saveAdminsSheet(sheetId, currentToken, adminsList);
+      // Execute robust multi-step sync:
+      // Verify spreadsheet -> Read metadata -> Ensure all required tabs & headers -> Sync all collections
+      await syncFullDatabase(sheetId, currentToken, {
+        assets,
+        shipments,
+        gatePasses,
+        auditLogs,
+        campaigns,
+        admins: adminsList
+      });
 
       setLastSync(new Date());
       setSyncError(null);
     } catch (e: any) {
-      console.warn('Google Sheets Sync is currently offline:', e.message || e);
+      console.warn('Google Sheets Sync failed:', e.message || e);
       setSyncError(e.message || 'Failed to sync with Google Sheets');
     } finally {
       setIsSyncing(false);
@@ -1494,8 +1499,8 @@ export default function App() {
                                       if (window.confirm(`Are you sure you want to revoke Super Admin status from ${admin.email}?`)) {
                                         const nextAdmins = adminsList.filter(a => a.email.toLowerCase() !== admin.email.toLowerCase());
                                         setAdminsList(nextAdmins);
-                                        await runSheetSync(async () => {
-                                          await saveAdminsSheet(spreadsheetId!, token!, nextAdmins);
+                                        await runSheetSync(async (sheetId, activeToken) => {
+                                          await saveAdminsSheet(sheetId, activeToken, nextAdmins);
                                         });
                                         await logAdminAction('Revoked Super Admin', admin.email);
                                         alert(`Authority successfully revoked from ${admin.email}`);

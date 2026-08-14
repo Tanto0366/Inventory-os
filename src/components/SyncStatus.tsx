@@ -83,26 +83,49 @@ export default function SyncStatus({
 
       {/* Sync Status Banner / Alert */}
       {syncError ? (
-        <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-            <div>
-              <span className="font-bold text-amber-900">Sync Notice: </span>
-              <span>{syncError === 'DEMO_MODE' ? 'Operating in offline demo mode. Click "Sync Sheet Now" to connect your Google account.' : syncError}</span>
+        <div className={`p-4 rounded-2xl border ${
+          syncError === 'DEMO_MODE'
+            ? 'bg-amber-50 border-amber-200 text-amber-900'
+            : 'bg-rose-50 border-rose-200 text-rose-900'
+        } space-y-2`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <AlertCircle className={`w-5 h-5 mt-0.5 shrink-0 ${
+                syncError === 'DEMO_MODE' ? 'text-amber-600' : 'text-rose-600'
+              }`} />
+              <div className="space-y-1">
+                <div className="font-bold text-sm">
+                  {syncError === 'DEMO_MODE' ? 'Offline Demo Session' : 'Google Sheets Sync Error'}
+                </div>
+                <div className="text-xs leading-relaxed opacity-90">
+                  {syncError === 'DEMO_MODE'
+                    ? 'Operating in offline demo mode. Click "Sync Sheet Now" or sign in with Google to enable live two-way sync.'
+                    : syncError}
+                </div>
+                {syncError !== 'DEMO_MODE' && (
+                  <div className="text-[11px] font-mono text-rose-700 bg-white/70 p-2 rounded-xl border border-rose-200/60 mt-2 break-all">
+                    {syncError}
+                  </div>
+                )}
+              </div>
             </div>
+            <button
+              onClick={onSync}
+              disabled={isSyncing}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer shadow-sm ${
+                syncError === 'DEMO_MODE'
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white'
+              }`}
+            >
+              {isSyncing ? 'Retrying...' : 'Retry Sync'}
+            </button>
           </div>
-          <button
-            onClick={onSync}
-            disabled={isSyncing}
-            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0"
-          >
-            Retry
-          </button>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-[#F8F9FA] border border-[#E9ECEF] text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-2xl bg-[#F8F9FA] border border-[#E9ECEF] text-xs">
           <div className="flex items-center gap-2 text-[#2D3436]">
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
             <span className="font-semibold">Spreadsheet ID:</span>
             <span className="font-mono text-[11px] text-[#636E72] bg-white px-2 py-0.5 rounded border border-[#DEE2E6]">
               {spreadsheetId || 'Not Connected'}

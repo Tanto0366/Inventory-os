@@ -283,15 +283,150 @@ export async function findSpreadsheet(token: string): Promise<string | null> {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) throw new Error('Failed to search Drive');
+    if (!res.ok) {
+      await handleGoogleApiError(res, 'Failed to search Google Drive for InventoryOS_Database');
+    }
     const data = await res.json();
     if (data.files && data.files.length > 0) {
       return data.files[0].id;
     }
   } catch (e) {
-    console.warn('Network issue or unauthorized when finding spreadsheet:', e);
+    console.warn('Network issue or search Drive error:', e);
   }
   return null;
+}
+
+// In-memory cache for schema validation to avoid redundant API hits within 30s
+const verifiedSpreadsheets = new Map<string, number>();
+
+/**
+ * Robust Google API error handler. Extracts the exact error message from Google's response body.
+ */
+export async function handleGoogleApiError(res: Response, context?: string): Promise<never> {
+  let detailMessage = `${res.status} ${res.statusText}`;
+  try {
+    const errorJson = await res.json();
+    if (errorJson?.error?.message) {
+      detailMessage = errorJson.error.message;
+    } else if (errorJson?.message) {
+      detailMessage = errorJson.message;
+    }
+  } catch {
+    try {
+      const text = await res.text();
+      if (text) detailMessage = text.slice(0, 300);
+    } catch {}
+  }
+  const prefix = context ? `${context}: ` : 'Google Sheets Error: ';
+  throw new Error(`${prefix}${detailMessage}`);
+}
+
+/**
+ * Verifies spreadsheet exists, inspects worksheet metadata, and automatically creates missing tabs & default headers.
+ */
+export async function ensureSpreadsheetSchema(spreadsheetId: string, token: string, force = false): Promise<void> {
+  const lastVerified = verifiedSpreadsheets.get(spreadsheetId);
+  const now = Date.now();
+  if (!force && lastVerified && now - lastVerified < 30000) {
+    return;
+  }
+
+  // 1. Verify spreadsheet exists & read worksheet metadata
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!metaRes.ok) {
+    await handleGoogleApiError(metaRes, 'Failed to fetch spreadsheet metadata');
+  }
+
+  const meta = await metaRes.json();
+  const existingSheets: { sheetId: number; title: string }[] = (meta.sheets || []).map((s: any) => ({
+    sheetId: s.properties?.sheetId,
+    title: s.properties?.title
+  }));
+  const existingTitles = new Set(existingSheets.map(s => s.title));
+
+  // 2. Check required tabs
+  const missingTabs = REQUIRED_SHEETS.filter(req => !existingTitles.has(req));
+  const requests: any[] = [];
+
+  // Special case: if spreadsheet only has "Sheet1" and missing Dashboard, rename Sheet1 to Dashboard
+  if (existingSheets.length === 1 && existingSheets[0].title === 'Sheet1' && !existingTitles.has('Dashboard')) {
+    requests.push({
+      updateSheetProperties: {
+        properties: {
+          sheetId: existingSheets[0].sheetId,
+          title: 'Dashboard'
+        },
+        fields: 'title'
+      }
+    });
+    existingTitles.add('Dashboard');
+  }
+
+  // 3. Automatically add missing tabs
+  for (const tab of missingTabs) {
+    if (tab === 'Dashboard' && existingTitles.has('Dashboard')) continue;
+    requests.push({
+      addSheet: {
+        properties: { title: tab }
+      }
+    });
+  }
+
+  if (requests.length > 0) {
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const batchRes = await fetch(batchUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ requests })
+    });
+    if (!batchRes.ok) {
+      await handleGoogleApiError(batchRes, 'Failed to create missing worksheet tabs');
+    }
+  }
+
+  // 4. Verify & Write initial headers for any newly created or missing tab headers
+  const headerUpdates: { range: string; values: any[][] }[] = [];
+  
+  if (missingTabs.includes('Assets Database')) {
+    headerUpdates.push({ range: 'Assets Database!A1:R1', values: [HEADERS['Assets Database']] });
+  }
+  if (missingTabs.includes('Shipment Tracker')) {
+    headerUpdates.push({ range: 'Shipment Tracker!A1:AG1', values: [HEADERS['Shipment Tracker']] });
+  }
+  if (missingTabs.includes('Gate Pass')) {
+    headerUpdates.push({ range: 'Gate Pass!A1:M1', values: [HEADERS['Gate Pass']] });
+  }
+  if (missingTabs.includes('Audit Trail')) {
+    headerUpdates.push({ range: 'Audit Trail!A1:G1', values: [HEADERS['Audit Trail']] });
+  }
+  if (missingTabs.includes('Campaigns')) {
+    headerUpdates.push({ range: 'Campaigns!A1:H1', values: [HEADERS['Campaigns']] });
+  }
+  if (missingTabs.includes('Admin')) {
+    headerUpdates.push({ range: 'Admin!A1:D1', values: [['Email', 'Role', 'Granted By', 'Granted On']] });
+    headerUpdates.push({ range: 'Admin!F1:I1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By']] });
+  }
+  if (missingTabs.includes('Owners')) {
+    headerUpdates.push({ range: 'Owners!A1:C1', values: [HEADERS['Owners']] });
+  }
+  if (missingTabs.includes('Possessors')) {
+    headerUpdates.push({ range: 'Possessors!A1:C1', values: [HEADERS['Possessors']] });
+  }
+  if (missingTabs.includes('Locations')) {
+    headerUpdates.push({ range: 'Locations!A1:C1', values: [HEADERS['Locations']] });
+  }
+
+  if (headerUpdates.length > 0) {
+    await writeBatchValues(spreadsheetId, token, headerUpdates);
+  }
+
+  verifiedSpreadsheets.set(spreadsheetId, now);
 }
 
 // 2. Create and provision a brand new spreadsheet with all sheets and headers
@@ -309,7 +444,9 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     })
   });
 
-  if (!createRes.ok) throw new Error('Failed to create new spreadsheet');
+  if (!createRes.ok) {
+    await handleGoogleApiError(createRes, 'Failed to create new spreadsheet');
+  }
   const spreadsheet = await createRes.json();
   const spreadsheetId = spreadsheet.spreadsheetId;
 
@@ -348,7 +485,9 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     body: JSON.stringify({ requests })
   });
 
-  if (!batchRes.ok) throw new Error('Failed to provision sheets');
+  if (!batchRes.ok) {
+    await handleGoogleApiError(batchRes, 'Failed to provision sheets');
+  }
 
   // Populate Dashboard Sheet with clean welcome / overview information
   const welcomeValues = [
@@ -393,6 +532,7 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
   ];
 
   await writeBatchValues(spreadsheetId, token, updates);
+  verifiedSpreadsheets.set(spreadsheetId, Date.now());
 
   return {
     spreadsheetId,
@@ -412,8 +552,11 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
   };
 }
 
-// 3. Load entire database from spreadsheet in batch
+// 3. Load entire database from spreadsheet in batch with prior schema check
 export async function loadSpreadsheetData(spreadsheetId: string, token: string): Promise<SheetData> {
+  // Ensure schema exists before querying batch ranges to avoid "Unable to parse range"
+  await ensureSpreadsheetSchema(spreadsheetId, token);
+
   const ranges = [
     'Assets Database!A1:R2000',
     'Gate Pass!A1:M1000',
@@ -434,7 +577,9 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     headers: { Authorization: `Bearer ${token}` }
   });
 
-  if (!res.ok) throw new Error('Failed to batch load spreadsheet sheets');
+  if (!res.ok) {
+    await handleGoogleApiError(res, 'Google Sheets Error during batch data load');
+  }
   const result = await res.json();
   const valueRanges = result.valueRanges || [];
 
@@ -460,58 +605,93 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     owners,
     possessors,
     locations,
-    admins,
+    admins: admins.length > 0 ? admins : [
+      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+    ],
     adminLogs
   };
 }
 
-// 4. Overwrite/save the entire Assets worksheet
-export async function saveAssetsSheet(spreadsheetId: string, token: string, assets: Asset[]): Promise<void> {
-  const values = assets.map(mapAssetToRow);
-  const range = `Assets Database!A2:R${Math.max(assets.length + 100, 200)}`;
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
-  const clearRes = await fetch(clearUrl, {
+// 4. Master Full Database Sync Pipeline
+export async function syncFullDatabase(
+  spreadsheetId: string,
+  token: string,
+  data: {
+    assets: Asset[];
+    shipments: Shipment[];
+    gatePasses: GatePass[];
+    auditLogs: AuditEntry[];
+    campaigns: Campaign[];
+    admins: AdminUser[];
+  }
+): Promise<void> {
+  // Step 1: Verify spreadsheet exists, read worksheet metadata, check required tabs, create missing tabs, verify headers
+  await ensureSpreadsheetSchema(spreadsheetId, token);
+
+  // Step 2: Sync Assets Database
+  await saveAssetsSheet(spreadsheetId, token, data.assets);
+
+  // Step 3: Sync Shipment Tracker
+  await saveShipmentsSheet(spreadsheetId, token, data.shipments);
+
+  // Step 4: Sync Gate Passes
+  await saveGatePassesSheet(spreadsheetId, token, data.gatePasses);
+
+  // Step 5: Sync Audit Trail
+  await saveAuditLogsSheet(spreadsheetId, token, data.auditLogs);
+
+  // Step 6: Sync Campaigns
+  await saveCampaignsSheet(spreadsheetId, token, data.campaigns);
+
+  // Step 7: Sync Admins
+  await saveAdminsSheet(spreadsheetId, token, data.admins);
+}
+
+// Helper: Clear a specific range
+async function clearRange(spreadsheetId: string, token: string, range: string): Promise<void> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` }
   });
-  if (!clearRes.ok) console.warn('Assets clear range warning:', clearRes.statusText);
+  if (!res.ok) {
+    console.warn(`Clear range warning on "${range}":`, res.statusText);
+  }
+}
 
+// Overwrite/save the entire Assets worksheet
+export async function saveAssetsSheet(spreadsheetId: string, token: string, assets: Asset[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
+  const values = assets.map(mapAssetToRow);
+  const clearRangeName = `Assets Database!A2:R${Math.max(assets.length + 100, 200)}`;
+  await clearRange(spreadsheetId, token, clearRangeName);
   await writeValues(spreadsheetId, token, `Assets Database!A1:R${assets.length + 1}`, [HEADERS['Assets Database'], ...values]);
 }
 
 // Save all Gate Passes
 export async function saveGatePassesSheet(spreadsheetId: string, token: string, gatePasses: GatePass[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const values = gatePasses.map(mapGatePassToRow);
-  const range = `Gate Pass!A2:M${Math.max(gatePasses.length + 100, 200)}`;
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
-  const clearRes = await fetch(clearUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!clearRes.ok) console.warn('Gate Pass clear range warning:', clearRes.statusText);
-
+  const clearRangeName = `Gate Pass!A2:M${Math.max(gatePasses.length + 100, 200)}`;
+  await clearRange(spreadsheetId, token, clearRangeName);
   await writeValues(spreadsheetId, token, `Gate Pass!A1:M${gatePasses.length + 1}`, [HEADERS['Gate Pass'], ...values]);
 }
 
 // Save all Audit Logs
 export async function saveAuditLogsSheet(spreadsheetId: string, token: string, auditLogs: AuditEntry[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const values = auditLogs.map(mapAuditToRow);
-  const range = `Audit Trail!A2:G${Math.max(auditLogs.length + 100, 200)}`;
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
-  const clearRes = await fetch(clearUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!clearRes.ok) console.warn('Audit Trail clear range warning:', clearRes.statusText);
-
+  const clearRangeName = `Audit Trail!A2:G${Math.max(auditLogs.length + 100, 200)}`;
+  await clearRange(spreadsheetId, token, clearRangeName);
   await writeValues(spreadsheetId, token, `Audit Trail!A1:G${auditLogs.length + 1}`, [HEADERS['Audit Trail'], ...values]);
 }
 
-// 5. Append new Gate Pass
+// Append new Gate Pass
 export async function appendGatePass(spreadsheetId: string, token: string, gp: GatePass): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const row = mapGatePassToRow(gp);
   const range = 'Gate Pass!A2';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
   const res = await fetch(url, {
     method: 'POST',
@@ -524,15 +704,16 @@ export async function appendGatePass(spreadsheetId: string, token: string, gp: G
     })
   });
   if (!res.ok) {
-    throw new Error(`Failed to append Gate Pass: ${res.status} ${res.statusText}`);
+    await handleGoogleApiError(res, 'Google Sheets Error appending Gate Pass');
   }
 }
 
-// 6. Append new Audit Entry
+// Append new Audit Entry
 export async function appendAuditLog(spreadsheetId: string, token: string, log: AuditEntry): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const row = mapAuditToRow(log);
   const range = 'Audit Trail!A2';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
   const res = await fetch(url, {
     method: 'POST',
@@ -545,17 +726,15 @@ export async function appendAuditLog(spreadsheetId: string, token: string, log: 
     })
   });
   if (!res.ok) {
-    throw new Error(`Failed to append Audit Log: ${res.status} ${res.statusText}`);
+    await handleGoogleApiError(res, 'Google Sheets Error appending Audit Log');
   }
 }
 
-// 7. Sync Campaigns, Owners, Possessors, Locations
+// Sync Campaigns
 export async function saveCampaignsSheet(spreadsheetId: string, token: string, campaigns: Campaign[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const values = campaigns.map(mapCampaignToRow);
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Campaigns!A2:H500:clear`;
-  const clearRes = await fetch(clearUrl, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-  if (!clearRes.ok) console.warn('Campaigns clear warning:', clearRes.statusText);
-
+  await clearRange(spreadsheetId, token, 'Campaigns!A2:H500');
   await writeValues(spreadsheetId, token, `Campaigns!A1:H${campaigns.length + 1}`, [HEADERS['Campaigns'], ...values]);
 }
 
@@ -575,7 +754,7 @@ async function writeBatchValues(spreadsheetId: string, token: string, updates: {
     body: JSON.stringify(data)
   });
   if (!res.ok) {
-    throw new Error(`Failed batch update sheet: ${res.status} ${res.statusText}`);
+    await handleGoogleApiError(res, 'Google Sheets Error during batch update');
   }
 }
 
@@ -590,7 +769,7 @@ async function writeValues(spreadsheetId: string, token: string, range: string, 
     body: JSON.stringify({ values })
   });
   if (!res.ok) {
-    throw new Error(`Failed to write values to range ${range}: ${res.status} ${res.statusText}`);
+    await handleGoogleApiError(res, `Google Sheets Error writing to range "${range}"`);
   }
 }
 
@@ -969,39 +1148,31 @@ export function parseRowsToShipments(rows: any[][]): Shipment[] {
 }
 
 export async function saveShipmentsSheet(spreadsheetId: string, token: string, shipments: Shipment[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const values = shipments.map(mapShipmentToRow);
-  const range = `Shipment Tracker!A2:AG${shipments.length + 100}`;
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
-  await fetch(clearUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const clearRangeName = `Shipment Tracker!A2:AG${Math.max(shipments.length + 100, 200)}`;
+  await clearRange(spreadsheetId, token, clearRangeName);
   await writeValues(spreadsheetId, token, `Shipment Tracker!A1:AG${shipments.length + 1}`, [HEADERS['Shipment Tracker'], ...values]);
 }
 
 // Save entire Admins list
 export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const headers = ['Email', 'Role', 'Granted By', 'Granted On'];
   const values = admins.map(a => [a.email, a.role, a.grantedBy, a.grantedOn]);
   
-  // Clear first
-  const range = 'Admin!A1:D500';
-  const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`;
-  await fetch(clearUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
-  });
-
+  await clearRange(spreadsheetId, token, 'Admin!A2:D500');
   await writeValues(spreadsheetId, token, `Admin!A1:D${admins.length + 1}`, [headers, ...values]);
 }
 
 // Append an admin log
 export async function appendAdminLog(spreadsheetId: string, token: string, log: AdminLog): Promise<void> {
+  await ensureSpreadsheetSchema(spreadsheetId, token);
   const row = [log.timestamp, log.action, log.targetEmail, log.performedBy];
   const range = 'Admin!F2';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1011,6 +1182,9 @@ export async function appendAdminLog(spreadsheetId: string, token: string, log: 
       values: [row]
     })
   });
+  if (!res.ok) {
+    await handleGoogleApiError(res, 'Google Sheets Error appending Admin Log');
+  }
 }
 
 export function getSampleSheetData(): SheetData {
