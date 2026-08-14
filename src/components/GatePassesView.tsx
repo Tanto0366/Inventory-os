@@ -92,6 +92,16 @@ export default function GatePassesView({
                     <ArrowRight className="w-3 h-3 text-[#ADB5BD] shrink-0" />
                     <span>{gp.dest}</span>
                   </div>
+                  {(gp.originAddress || gp.destAddress) && (
+                    <div className="text-[11px] text-[#636E72] mt-0.5 leading-snug space-y-0.5">
+                      {gp.originAddress && (
+                        <div className="truncate"><span className="text-[#ADB5BD]">From:</span> {gp.originAddress}</div>
+                      )}
+                      {gp.destAddress && (
+                        <div className="truncate"><span className="text-[#ADB5BD]">To:</span> {gp.destAddress}</div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>

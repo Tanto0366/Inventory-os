@@ -18,6 +18,7 @@ interface ShipmentsViewProps {
   saveShipmentsSheet: (shipments: Shipment[]) => Promise<void>;
   saveAssetsSheet: (assets: Asset[]) => Promise<void>;
   userEmail?: string;
+  isSuperAdmin?: boolean;
   onOpenGatePassPreview?: (gatePassId: string) => void;
 }
 
@@ -58,6 +59,7 @@ export const ShipmentsView: React.FC<ShipmentsViewProps> = ({
   saveShipmentsSheet,
   saveAssetsSheet,
   userEmail,
+  isSuperAdmin = true,
   onOpenGatePassPreview
 }) => {
   // Filters & State
@@ -737,21 +739,25 @@ export const ShipmentsView: React.FC<ShipmentsViewProps> = ({
                       <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
                           
-                          <button
-                            onClick={() => openStatusModal(s)}
-                            title="Update Status / Logistics"
-                            className="p-1.5 hover:bg-purple-50 text-purple-700 rounded-lg transition cursor-pointer"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                          {isSuperAdmin && (
+                            <>
+                              <button
+                                onClick={() => openStatusModal(s)}
+                                title="Update Status / Logistics"
+                                className="p-1.5 hover:bg-purple-50 text-purple-700 rounded-lg transition cursor-pointer"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
 
-                          <button
-                            onClick={() => openDeliveryModal(s)}
-                            title="Confirm Delivery / Receipt"
-                            className="p-1.5 hover:bg-emerald-50 text-emerald-700 rounded-lg transition cursor-pointer"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                          </button>
+                              <button
+                                onClick={() => openDeliveryModal(s)}
+                                title="Confirm Delivery / Receipt"
+                                className="p-1.5 hover:bg-emerald-50 text-emerald-700 rounded-lg transition cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
 
                           <button
                             onClick={() => setManifestShipment(s)}

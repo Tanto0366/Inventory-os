@@ -53,7 +53,7 @@ const HEADERS = {
     'Last Updated', 'Assets JSON', 'Timeline JSON'
   ],
   'Gate Pass': [
-    'Gate Pass Number', 'Pass Type', 'Company', 'Serials', 'Origin', 'Destination', 
+    'Gate Pass Number', 'Pass Type', 'Company', 'Serials', 'Origin', 'Origin Address', 'Destination', 'Destination Address', 
     'Shipping Date', 'ETA', 'Receiver', 'Possessor After', 'New Status', 'Notes', 'Created Date'
   ],
   'Audit Trail': [
@@ -92,9 +92,9 @@ const SAMPLE_ASSETS: Asset[] = [
 ];
 
 const SAMPLE_GATE_PASSES: GatePass[] = [
-  { id: 'GP-001', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['PF48LND0', 'PF4954J4'], origin: 'Mumbai', dest: 'Practice Office Delhi', shipDate: '2026-01-09', eta: '2026-02-09', receiver: 'Karan', possessor: 'Karan', newStatus: 'In Transit', notes: 'Lenovo AP Yoga campaign delivery', createdDate: '2026-01-09' },
-  { id: 'GP-002', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['5CG5214PHW', '5CG5214PHJ', '5CG5214PJS', '5CD5305K7Z'], origin: 'Kochi', dest: 'Gurgaon - Nodwin office', shipDate: '2026-01-28', eta: '2026-02-01', receiver: 'Aditya', possessor: 'Aditya', newStatus: 'Delivered', notes: 'OMEN Red.Gaming event', createdDate: '2026-01-28' },
-  { id: 'GP-003', type: 'inbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['HP-MULTI-6'], origin: 'Chennai', dest: 'Bangalore', shipDate: '2026-01-08', eta: '2026-01-12', receiver: 'Nikhil', possessor: 'Nikhil', newStatus: 'In House', notes: 'Return from Redington Store Activity', createdDate: '2026-01-12' }
+  { id: 'GP-001', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['PF48LND0', 'PF4954J4'], origin: 'Mumbai', originAddress: 'Hub 4, BKC Industrial Estate, Mumbai 400051', dest: 'Practice Office Delhi', destAddress: 'Tower B, DLF Cyber City, Phase 2, Gurugram / Delhi NCR', shipDate: '2026-01-09', eta: '2026-02-09', receiver: 'Karan', possessor: 'Karan', newStatus: 'In Transit', notes: 'Lenovo AP Yoga campaign delivery', createdDate: '2026-01-09' },
+  { id: 'GP-002', type: 'outbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['5CG5214PHW', '5CG5214PHJ', '5CG5214PJS', '5CD5305K7Z'], origin: 'Kochi', originAddress: 'Central Tech Park, Kakkanad, Kochi 682030', dest: 'Gurgaon - Nodwin office', destAddress: 'Nodwin Gaming HQ, Udyog Vihar Phase 4, Gurugram 122015', shipDate: '2026-01-28', eta: '2026-02-01', receiver: 'Aditya', possessor: 'Aditya', newStatus: 'Delivered', notes: 'OMEN Red.Gaming event', createdDate: '2026-01-28' },
+  { id: 'GP-003', type: 'inbound', company: 'AFMV Logistics Pvt. Ltd.', serials: ['HP-MULTI-6'], origin: 'Chennai', originAddress: 'Redington Distribution Hub, Guindy, Chennai 600032', dest: 'Bangalore', destAddress: 'AFMV Logistics Warehouse, Indiranagar, Bangalore 560038', shipDate: '2026-01-08', eta: '2026-01-12', receiver: 'Nikhil', possessor: 'Nikhil', newStatus: 'In House', notes: 'Return from Redington Store Activity', createdDate: '2026-01-12' }
 ];
 
 export const SAMPLE_SHIPMENTS: Shipment[] = [
@@ -526,9 +526,9 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     { range: `Possessors!A2:C${SAMPLE_POSSESSORS.length + 1}`, values: SAMPLE_POSSESSORS.map(p => [p.name, p.role, p.department]) },
     { range: 'Locations!A1:C1', values: [HEADERS['Locations']] },
     { range: `Locations!A2:C${SAMPLE_LOCATIONS.length + 1}`, values: SAMPLE_LOCATIONS.map(l => [l.city, l.address, l.type]) },
-    { range: 'Admin!A1:D1', values: [['Email', 'Role', 'Granted By', 'Granted On']] },
-    { range: 'Admin!A2:D2', values: [['aditya@aftermathventures.in', 'Super Admin', 'System', new Date().toISOString().split('T')[0]]] },
-    { range: 'Admin!F1:I1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By']] }
+    { range: 'Admin!A1:G1', values: [['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated']] },
+    { range: 'Admin!A2:G2', values: [['aditya@aftermathventures.in', 'Super Admin', 'Protected', 'System', new Date().toISOString().split('T')[0], new Date().toISOString().split('T')[0], new Date().toISOString().split('T')[0]]] },
+    { range: 'Admin!I1:M1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By', 'Result']] }
   ];
 
   await writeBatchValues(spreadsheetId, token, updates);
@@ -546,7 +546,7 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     possessors: SAMPLE_POSSESSORS,
     locations: SAMPLE_LOCATIONS,
     admins: [
-      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+      { email: 'aditya@aftermathventures.in', role: 'Super Admin', status: 'Protected', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0], lastLogin: new Date().toISOString().split('T')[0], lastUpdated: new Date().toISOString().split('T')[0] }
     ],
     adminLogs: []
   };
@@ -565,8 +565,8 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     'Owners!A1:C500',
     'Possessors!A1:C500',
     'Locations!A1:C500',
-    'Admin!A1:D500',
-    'Admin!F1:I1000',
+    'Admin!A1:G500',
+    'Admin!I1:M1000',
     'Shipment Tracker!A1:AG2000'
   ];
 
@@ -606,7 +606,15 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     possessors,
     locations,
     admins: admins.length > 0 ? admins : [
-      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+      {
+        email: 'aditya@aftermathventures.in',
+        role: 'Super Admin',
+        status: 'Protected',
+        grantedBy: 'System',
+        grantedOn: new Date().toISOString().split('T')[0],
+        lastLogin: new Date().toISOString().split('T')[0],
+        lastUpdated: new Date().toISOString().split('T')[0]
+      }
     ],
     adminLogs
   };
@@ -804,7 +812,9 @@ function mapGatePassToRow(g: GatePass): any[] {
     g.company || '',
     JSON.stringify(g.serials || []),
     g.origin || '',
+    g.originAddress || '',
     g.dest || '',
+    g.destAddress || '',
     g.shipDate || '',
     g.eta || '',
     g.receiver || '',
@@ -950,6 +960,11 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
 
 function parseRowsToGatePasses(rows: any[][]): GatePass[] {
   if (rows.length <= 1) return [];
+  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const originAddrIdx = headerRow.indexOf('origin address');
+  const destAddrIdx = headerRow.indexOf('destination address');
+  const hasAddrHeaders = originAddrIdx !== -1 && destAddrIdx !== -1;
+
   const body = rows.slice(1);
   return body.map(r => {
     let serials: string[] = [];
@@ -959,21 +974,63 @@ function parseRowsToGatePasses(rows: any[][]): GatePass[] {
     } catch {
       serials = r[3] ? String(r[3]).split(',').map(s => s.trim()) : [];
     }
-    return {
-      id: String(r[0] || ''),
-      type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
-      company: String(r[2] || ''),
-      serials,
-      origin: String(r[4] || ''),
-      dest: String(r[5] || ''),
-      shipDate: String(r[6] || ''),
-      eta: String(r[7] || ''),
-      receiver: String(r[8] || ''),
-      possessor: String(r[9] || ''),
-      newStatus: String(r[10] || ''),
-      notes: String(r[11] || ''),
-      createdDate: String(r[12] || '')
-    };
+
+    if (hasAddrHeaders) {
+      return {
+        id: String(r[0] || ''),
+        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+        company: String(r[2] || ''),
+        serials,
+        origin: String(r[4] || ''),
+        originAddress: String(r[originAddrIdx] || ''),
+        dest: String(r[destAddrIdx - 1] || r[6] || ''),
+        destAddress: String(r[destAddrIdx] || ''),
+        shipDate: String(r[8] || ''),
+        eta: String(r[9] || ''),
+        receiver: String(r[10] || ''),
+        possessor: String(r[11] || ''),
+        newStatus: String(r[12] || ''),
+        notes: String(r[13] || ''),
+        createdDate: String(r[14] || '')
+      };
+    } else if (r.length >= 15) {
+      return {
+        id: String(r[0] || ''),
+        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+        company: String(r[2] || ''),
+        serials,
+        origin: String(r[4] || ''),
+        originAddress: String(r[5] || ''),
+        dest: String(r[6] || ''),
+        destAddress: String(r[7] || ''),
+        shipDate: String(r[8] || ''),
+        eta: String(r[9] || ''),
+        receiver: String(r[10] || ''),
+        possessor: String(r[11] || ''),
+        newStatus: String(r[12] || ''),
+        notes: String(r[13] || ''),
+        createdDate: String(r[14] || '')
+      };
+    } else {
+      // Legacy 13-column format
+      return {
+        id: String(r[0] || ''),
+        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+        company: String(r[2] || ''),
+        serials,
+        origin: String(r[4] || ''),
+        originAddress: '',
+        dest: String(r[5] || ''),
+        destAddress: '',
+        shipDate: String(r[6] || ''),
+        eta: String(r[7] || ''),
+        receiver: String(r[8] || ''),
+        possessor: String(r[9] || ''),
+        newStatus: String(r[10] || ''),
+        notes: String(r[11] || ''),
+        createdDate: String(r[12] || '')
+      };
+    }
   }).filter(g => g.id);
 }
 
@@ -1034,12 +1091,47 @@ function parseRowsToLocations(rows: any[][]): LocationInfo[] {
 
 function parseRowsToAdmins(rows: any[][]): AdminUser[] {
   if (!rows || rows.length <= 1) return [];
-  return rows.slice(1).map(r => ({
-    email: String(r[0] || '').trim(),
-    role: String(r[1] || 'Super Admin').trim(),
-    grantedBy: String(r[2] || 'System').trim(),
-    grantedOn: String(r[3] || '').trim()
-  })).filter(a => a.email);
+  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const hasStatus = header.includes('status');
+
+  return rows.slice(1).map(r => {
+    const email = String(r[0] || '').trim();
+    if (!email) return null;
+
+    const isPrimary = email.toLowerCase() === 'aditya@aftermathventures.in';
+
+    if (hasStatus || r.length >= 5) {
+      const rawRole = String(r[1] || '').trim();
+      const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole === 'Super Admin') ? 'Super Admin' : 'Admin';
+      const rawStatus = String(r[2] || '').trim();
+      const status: 'Active' | 'Revoked' | 'Protected' = isPrimary 
+        ? 'Protected' 
+        : (rawStatus === 'Revoked' ? 'Revoked' : 'Active');
+      
+      return {
+        email,
+        role,
+        status,
+        grantedBy: String(r[3] || (isPrimary ? 'System' : 'Super Admin')).trim(),
+        grantedOn: String(r[4] || new Date().toISOString().split('T')[0]).trim(),
+        lastLogin: r[5] ? String(r[5]).trim() : undefined,
+        lastUpdated: r[6] ? String(r[6]).trim() : undefined
+      };
+    } else {
+      // Legacy 4-column [Email, Role, Granted By, Granted On]
+      const rawRole = String(r[1] || '').trim();
+      const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole === 'Super Admin') ? 'Super Admin' : 'Admin';
+      return {
+        email,
+        role,
+        status: (isPrimary ? 'Protected' : 'Active') as 'Active' | 'Revoked' | 'Protected',
+        grantedBy: String(r[2] || 'System').trim(),
+        grantedOn: String(r[3] || new Date().toISOString().split('T')[0]).trim(),
+        lastLogin: undefined,
+        lastUpdated: undefined
+      };
+    }
+  }).filter(Boolean) as AdminUser[];
 }
 
 function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
@@ -1048,7 +1140,8 @@ function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
     timestamp: String(r[0] || '').trim(),
     action: String(r[1] || '').trim(),
     targetEmail: String(r[2] || '').trim(),
-    performedBy: String(r[3] || '').trim()
+    performedBy: String(r[3] || '').trim(),
+    result: String(r[4] || 'Success').trim()
   })).filter(l => l.timestamp);
 }
 
@@ -1155,35 +1248,47 @@ export async function saveShipmentsSheet(spreadsheetId: string, token: string, s
   await writeValues(spreadsheetId, token, `Shipment Tracker!A1:AG${shipments.length + 1}`, [HEADERS['Shipment Tracker'], ...values]);
 }
 
-// Save entire Admins list
+// Save entire Admins list (7-column schema)
 export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
   await ensureSpreadsheetSchema(spreadsheetId, token);
-  const headers = ['Email', 'Role', 'Granted By', 'Granted On'];
-  const values = admins.map(a => [a.email, a.role, a.grantedBy, a.grantedOn]);
+  const headers = ['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated'];
+  const values = admins.map(a => [
+    a.email,
+    a.role || 'Admin',
+    a.status || 'Active',
+    a.grantedBy || 'System',
+    a.grantedOn || new Date().toISOString().split('T')[0],
+    a.lastLogin || '',
+    a.lastUpdated || new Date().toISOString().split('T')[0]
+  ]);
   
-  await clearRange(spreadsheetId, token, 'Admin!A2:D500');
-  await writeValues(spreadsheetId, token, `Admin!A1:D${admins.length + 1}`, [headers, ...values]);
+  await clearRange(spreadsheetId, token, 'Admin!A2:G500');
+  await writeValues(spreadsheetId, token, `Admin!A1:G${admins.length + 1}`, [headers, ...values]);
 }
 
-// Append an admin log
+// Append an admin activity log
 export async function appendAdminLog(spreadsheetId: string, token: string, log: AdminLog): Promise<void> {
   await ensureSpreadsheetSchema(spreadsheetId, token);
-  const row = [log.timestamp, log.action, log.targetEmail, log.performedBy];
-  const range = 'Admin!F2';
+  const row = [log.timestamp, log.action, log.targetEmail, log.performedBy, log.result || 'Success'];
+  const range = 'Admin!I2';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      values: [row]
-    })
-  });
-  if (!res.ok) {
-    await handleGoogleApiError(res, 'Google Sheets Error appending Admin Log');
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        values: [row]
+      })
+    });
+    if (!res.ok) {
+      console.warn('Google Sheets notice: Unable to append to Admin log range:', res.statusText);
+    }
+  } catch (err) {
+    console.warn('Google Sheets notice: Admin log network error:', err);
   }
 }
 
@@ -1200,7 +1305,15 @@ export function getSampleSheetData(): SheetData {
     possessors: SAMPLE_POSSESSORS,
     locations: SAMPLE_LOCATIONS,
     admins: [
-      { email: 'aditya@aftermathventures.in', role: 'Super Admin', grantedBy: 'System', grantedOn: new Date().toISOString().split('T')[0] }
+      { 
+        email: 'aditya@aftermathventures.in', 
+        role: 'Super Admin', 
+        status: 'Protected',
+        grantedBy: 'System', 
+        grantedOn: new Date().toISOString().split('T')[0],
+        lastLogin: new Date().toISOString().split('T')[0],
+        lastUpdated: new Date().toISOString().split('T')[0]
+      }
     ],
     adminLogs: []
   };

@@ -283,26 +283,32 @@ export default function AssetsView({
                       )}
                     </td>
                     <td className="p-4 text-right whitespace-nowrap space-x-1">
-                      <button
-                        onClick={() => onEditAsset(asset.serial)}
-                        className="inline-flex items-center gap-1 p-1.5 bg-white hover:bg-[#F1F3F5] border border-[#DEE2E6] text-[#2D3436] rounded-lg transition active:scale-95"
-                        title="Edit Asset Details"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      
-                      {isAdmin && (
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Delete ${asset.serial}? This will also delete from sheets.`)) {
-                              onDeleteAsset(asset.serial);
-                            }
-                          }}
-                          className="inline-flex items-center gap-1 p-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg transition active:scale-95"
-                          title="Delete Asset"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      {isAdmin ? (
+                        <>
+                          <button
+                            onClick={() => onEditAsset(asset.serial)}
+                            className="inline-flex items-center gap-1 p-1.5 bg-white hover:bg-[#F1F3F5] border border-[#DEE2E6] text-[#2D3436] rounded-lg transition active:scale-95 cursor-pointer"
+                            title="Edit Asset Details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Delete ${asset.serial}? This will also delete from sheets.`)) {
+                                onDeleteAsset(asset.serial);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 p-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg transition active:scale-95 cursor-pointer"
+                            title="Delete Asset"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-[#ADB5BD] font-mono italic">
+                          Read-only
+                        </span>
                       )}
                     </td>
                   </tr>

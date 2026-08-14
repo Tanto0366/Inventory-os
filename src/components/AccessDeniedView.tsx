@@ -1,0 +1,127 @@
+import React from 'react';
+import { ShieldAlert, RefreshCw, LogOut, Mail, Lock, CheckCircle2 } from 'lucide-react';
+import { PRIMARY_SUPER_ADMIN_EMAIL } from '../lib/auth';
+
+interface AccessDeniedViewProps {
+  userEmail: string;
+  isRevoked?: boolean;
+  onLogout: () => void;
+  onRefreshAuth: () => void;
+  isChecking?: boolean;
+}
+
+export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
+  userEmail,
+  isRevoked,
+  onLogout,
+  onRefreshAuth,
+  isChecking = false
+}) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopyEmail = () => {
+    navigator.clipboard.writeText(PRIMARY_SUPER_ADMIN_EMAIL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white border border-[#E9ECEF] rounded-3xl p-8 shadow-sm text-center">
+        
+        {/* Brand Header */}
+        <div className="flex items-center justify-center gap-2.5 mb-6">
+          <div className="w-10 h-10 bg-[#6C5CE7] rounded-xl flex items-center justify-center text-white shadow-xs">
+            <svg className="w-5 h-5 text-white" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="1" width="6" height="6" rx="1.5"/>
+              <rect x="9" y="1" width="6" height="6" rx="1.5"/>
+              <rect x="1" y="9" width="6" height="6" rx="1.5"/>
+              <rect x="9" y="9" width="6" height="6" rx="1.5"/>
+            </svg>
+          </div>
+          <div className="text-left">
+            <div className="text-base font-bold font-display text-[#2D3436] leading-none">InventoryOS</div>
+            <div className="text-[10px] text-[#ADB5BD] font-mono uppercase tracking-wider">Access Control Gateway</div>
+          </div>
+        </div>
+
+        {/* Status Badge & Icon */}
+        <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 mx-auto mb-4">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-full text-xs font-bold mb-3">
+          <Lock className="w-3.5 h-3.5" />
+          {isRevoked ? 'Access Revoked' : 'Access Restricted'}
+        </div>
+
+        <h1 className="text-xl font-bold font-display text-[#2D3436] mb-2">
+          {isRevoked ? 'Account Access Revoked' : 'Authorization Required'}
+        </h1>
+
+        <p className="text-xs text-[#636E72] leading-relaxed mb-6">
+          {isRevoked
+            ? 'Your administrator privileges for this Google account have been revoked by a Super Admin.'
+            : 'Your Google account is not listed in the authorized administrators ledger. InventoryOS data is restricted to verified Admin and Super Admin users.'}
+        </p>
+
+        {/* Account Info Box */}
+        <div className="bg-[#F8F9FA] border border-[#E9ECEF] rounded-2xl p-4 text-left text-xs mb-6 space-y-2">
+          <div>
+            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Signed-In Google Account</div>
+            <div className="font-mono font-bold text-[#2D3436] break-all">{userEmail}</div>
+          </div>
+          <div className="pt-2 border-t border-[#E9ECEF]">
+            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Assigned Role</div>
+            <div className="font-semibold text-rose-600">Unauthorized / No Access</div>
+          </div>
+        </div>
+
+        {/* Request Access Help */}
+        <div className="p-3.5 bg-purple-50 border border-purple-100 rounded-2xl text-left text-xs text-purple-900 mb-6 space-y-2">
+          <div className="font-bold flex items-center gap-1.5 text-purple-800">
+            <Mail className="w-4 h-4" /> Need Access?
+          </div>
+          <p className="text-[11px] leading-relaxed text-purple-900">
+            Contact the Primary Super Admin to request role assignment:
+          </p>
+          <div className="flex items-center justify-between gap-2 bg-white/80 border border-purple-200 rounded-xl px-3 py-1.5 font-mono text-[11px]">
+            <span className="truncate select-all text-purple-950 font-bold">{PRIMARY_SUPER_ADMIN_EMAIL}</span>
+            <button
+              onClick={handleCopyEmail}
+              className="text-[10px] font-bold text-[#6C5CE7] hover:underline shrink-0 flex items-center gap-1 cursor-pointer"
+            >
+              {copied ? <CheckCircle2 className="w-3 h-3 text-emerald-600" /> : null}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div className="space-y-2.5">
+          <button
+            onClick={onRefreshAuth}
+            disabled={isChecking}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
+            {isChecking ? 'Re-checking permissions...' : 'Check Authorization Again'}
+          </button>
+
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 border border-[#DEE2E6] text-[#2D3436] rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            <LogOut className="w-4 h-4 text-[#636E72]" />
+            Sign Out / Switch Account
+          </button>
+        </div>
+
+        <p className="text-[10px] text-[#ADB5BD] mt-6">
+          Security policy: All authentication and authorization attempts are timestamped and logged.
+        </p>
+
+      </div>
+    </div>
+  );
+};

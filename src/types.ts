@@ -26,7 +26,9 @@ export interface GatePass {
   company: string;
   serials: string[];
   origin: string;
+  originAddress?: string;
   dest: string;
+  destAddress?: string;
   shipDate: string;
   eta: string;
   receiver: string;
@@ -80,9 +82,12 @@ export interface LocationInfo {
 
 export interface AdminUser {
   email: string;
-  role: string;
+  role: 'Super Admin' | 'Admin';
+  status: 'Active' | 'Revoked' | 'Protected';
   grantedBy: string;
   grantedOn: string;
+  lastLogin?: string;
+  lastUpdated?: string;
 }
 
 export type ShipmentStatus = 
@@ -176,6 +181,7 @@ export interface AdminLog {
   action: string;
   targetEmail: string;
   performedBy: string;
+  result?: string;
 }
 
 

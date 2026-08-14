@@ -10,6 +10,7 @@ interface SyncStatusProps {
   onPull?: () => void;
   onPush?: () => void;
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   syncError?: string | null;
   counts?: {
     assets: number;
@@ -29,6 +30,7 @@ export default function SyncStatus({
   onSync,
   onPull,
   onPush,
+  isSuperAdmin = true,
   syncError,
   counts
 }: SyncStatusProps) {
@@ -87,7 +89,7 @@ export default function SyncStatus({
             </button>
           )}
 
-          {onPush && (
+          {onPush && isSuperAdmin && (
             <button
               onClick={onPush}
               disabled={isSyncing}
@@ -100,12 +102,13 @@ export default function SyncStatus({
           )}
 
           <button
-            onClick={onSync}
+            onClick={isSuperAdmin ? onSync : (onPull || onSync)}
             disabled={isSyncing}
+            title={isSuperAdmin ? "Synchronize local state and Google Sheets" : "Refresh and inspect latest sheet records"}
             className="flex items-center gap-2 px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Syncing...' : 'Sync Sheet Now'}
+            {isSyncing ? 'Syncing...' : (isSuperAdmin ? 'Sync Sheet Now' : 'Refresh Data')}
           </button>
         </div>
       </div>

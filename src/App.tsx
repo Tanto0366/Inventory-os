@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Package, 
   Home, 
@@ -24,7 +24,11 @@ import {
   SlidersHorizontal, 
   History, 
   UserPlus,
-  Navigation
+  Navigation,
+  Eye,
+  Lock,
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment, ShipmentAssetItem } from './types';
@@ -47,6 +51,7 @@ import {
   getSampleSheetData
 } from './lib/googleSheets';
 import { expandAssetsWithQuantities } from './lib/assetUtils';
+import { evaluateUserAuth, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail } from './lib/auth';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -56,6 +61,8 @@ import GatePassesView from './components/GatePassesView';
 import { ShipmentsView } from './components/ShipmentsView';
 import AuditTrailView from './components/AuditTrailView';
 import CampaignsView from './components/CampaignsView';
+import { AccessDeniedView } from './components/AccessDeniedView';
+import { EnterpriseAdminView } from './components/EnterpriseAdminView';
 
 export default function App() {
   // Auth & Token state
@@ -188,10 +195,16 @@ export default function App() {
     return getSampleSheetData().adminLogs;
   });
 
-  const isAdmin = !!(user && (
-    user.email === 'aditya@aftermathventures.in' || 
-    adminsList.some(a => a.email.toLowerCase() === user.email.toLowerCase())
-  ));
+  // Central RBAC Authorization State
+  const authStatus = useMemo(() => {
+    return evaluateUserAuth(user?.email, adminsList);
+  }, [user?.email, adminsList]);
+
+  const isAuthorized = authStatus.isAuthorized;
+  const isSuperAdmin = authStatus.isSuperAdmin;
+  const isAdminReadOnly = authStatus.isAdminReadOnly;
+  const isRevoked = authStatus.isRevoked;
+  const isAdmin = isSuperAdmin; // Backwards-compatible alias for Super Admin authority
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -223,7 +236,9 @@ export default function App() {
     company: 'AFMV Logistics Pvt. Ltd.',
     type: 'outbound' as 'outbound' | 'inbound',
     origin: 'Bangalore',
+    originAddress: '',
     dest: '',
+    destAddress: '',
     shipDate: new Date().toISOString().split('T')[0],
     eta: '',
     receiver: '',
@@ -416,6 +431,9 @@ export default function App() {
 
   // Push / Save to Google Sheets with Safety Guard against empty wipes
   const pushToGoogleSheets = async (activeToken: string | null = token, force: boolean = false) => {
+    // Assert Super Admin write authority
+    assertSuperAdmin(user?.email, adminsList, 'push inventory records to Google Sheets');
+
     const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
     if (!currentToken || currentToken === 'DEMO_TOKEN') {
       setSyncError('DEMO_MODE');
@@ -477,12 +495,17 @@ export default function App() {
     }
   };
 
-  // Sync Google Sheets integration (pulls if local empty, otherwise safely pushes)
+  // Sync Google Sheets integration (pulls if local empty or read-only admin; otherwise safely pushes)
   const triggerSheetsSync = async (activeToken: string | null = token) => {
-    if (assets.length === 0) {
-      await pullFromGoogleSheets(activeToken);
+    if (isSuperAdmin) {
+      if (assets.length === 0) {
+        await pullFromGoogleSheets(activeToken);
+      } else {
+        await pushToGoogleSheets(activeToken);
+      }
     } else {
-      await pushToGoogleSheets(activeToken);
+      // Read-only admins only refresh from Google Sheets
+      await pullFromGoogleSheets(activeToken);
     }
   };
 
@@ -500,16 +523,22 @@ export default function App() {
           localStorage.setItem('inventory_os_token', result.accessToken);
         } catch {}
 
-        const log = {
+        // Pull latest sheet data to evaluate live permissions
+        const sheetData = await pullFromGoogleSheets(result.accessToken);
+        const liveAdmins = sheetData?.admins || adminsList;
+        const currentAuth = evaluateUserAuth(result.user.email, liveAdmins);
+
+        const log: AdminLog = {
           timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-          action: 'User Signed In',
+          action: currentAuth.isAuthorized ? `User Login (${currentAuth.role})` : 'Unauthorized Login Attempt',
           targetEmail: result.user.email || '',
-          performedBy: result.user.email || ''
+          performedBy: result.user.email || '',
+          result: currentAuth.isAuthorized ? 'Success' : (currentAuth.isRevoked ? 'Revoked' : 'Denied')
         };
         setAdminLogs(prev => [log, ...prev]);
-
-        // Automatically pull & hydrate latest data from Google Sheets upon login
-        await pullFromGoogleSheets(result.accessToken);
+        await runSheetSync(async (sheetId, activeToken) => {
+          await appendAdminLog(sheetId, activeToken, log);
+        });
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -603,17 +632,128 @@ export default function App() {
     }
   };
 
-  const logAdminAction = async (action: string, targetEmail: string) => {
-    const log = {
+  const logAdminAction = async (action: string, targetEmail: string, result: string = 'Success') => {
+    const log: AdminLog = {
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
       action,
       targetEmail,
-      performedBy: user?.email || 'System'
+      performedBy: user?.email || 'System',
+      result
     };
     setAdminLogs(prev => [log, ...prev]);
     await runSheetSync(async (sheetId, activeToken) => {
       await appendAdminLog(sheetId, activeToken, log);
     });
+  };
+
+  // Enterprise Admin Management Handlers
+  const handleGrantAdmin = async (email: string, role: 'Admin' | 'Super Admin') => {
+    assertSuperAdmin(user?.email, adminsList, 'grant administrator authority');
+    const cleanEmail = normalizeEmail(email);
+    const now = new Date().toISOString().split('T')[0];
+    const nextAdmins: AdminUser[] = [
+      ...adminsList.filter(a => normalizeEmail(a.email) !== cleanEmail),
+      {
+        email: cleanEmail,
+        role,
+        status: 'Active',
+        grantedBy: user?.email || 'Super Admin',
+        grantedOn: now,
+        lastLogin: '—',
+        lastUpdated: now
+      }
+    ];
+    setAdminsList(nextAdmins);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+    });
+    await logAdminAction(`Admin Access Granted (${role})`, cleanEmail, 'Success');
+  };
+
+  const handleRevokeAdmin = async (email: string) => {
+    assertSuperAdmin(user?.email, adminsList, 'revoke administrator authority');
+    const cleanEmail = normalizeEmail(email);
+    if (cleanEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
+      alert('The Primary Super Admin account is permanently protected and cannot be revoked.');
+      return;
+    }
+    const now = new Date().toISOString().split('T')[0];
+    const nextAdmins = adminsList.map(a => {
+      if (normalizeEmail(a.email) === cleanEmail) {
+        return {
+          ...a,
+          status: 'Revoked' as const,
+          lastUpdated: now
+        };
+      }
+      return a;
+    });
+    setAdminsList(nextAdmins);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+    });
+    await logAdminAction('Admin Access Revoked', cleanEmail, 'Success');
+  };
+
+  const handleRestoreAdmin = async (email: string) => {
+    assertSuperAdmin(user?.email, adminsList, 'restore administrator authority');
+    const cleanEmail = normalizeEmail(email);
+    const now = new Date().toISOString().split('T')[0];
+    const nextAdmins = adminsList.map(a => {
+      if (normalizeEmail(a.email) === cleanEmail) {
+        return {
+          ...a,
+          status: 'Active' as const,
+          lastUpdated: now
+        };
+      }
+      return a;
+    });
+    setAdminsList(nextAdmins);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+    });
+    await logAdminAction('Admin Access Restored', cleanEmail, 'Success');
+  };
+
+  const handleChangeAdminRole = async (email: string, newRole: 'Admin' | 'Super Admin') => {
+    assertSuperAdmin(user?.email, adminsList, 'change administrator role');
+    const cleanEmail = normalizeEmail(email);
+    if (cleanEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
+      alert('The Primary Super Admin role cannot be modified.');
+      return;
+    }
+    const now = new Date().toISOString().split('T')[0];
+    const nextAdmins = adminsList.map(a => {
+      if (normalizeEmail(a.email) === cleanEmail) {
+        return {
+          ...a,
+          role: newRole,
+          lastUpdated: now
+        };
+      }
+      return a;
+    });
+    setAdminsList(nextAdmins);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+    });
+    await logAdminAction(`Admin Role Changed to ${newRole}`, cleanEmail, 'Success');
+  };
+
+  const handleDeleteAdminRecord = async (email: string) => {
+    assertSuperAdmin(user?.email, adminsList, 'delete administrator record');
+    const cleanEmail = normalizeEmail(email);
+    if (cleanEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
+      alert('The Primary Super Admin record cannot be deleted.');
+      return;
+    }
+    const nextAdmins = adminsList.filter(a => normalizeEmail(a.email) !== cleanEmail);
+    setAdminsList(nextAdmins);
+    await runSheetSync(async (sheetId, activeToken) => {
+      await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+    });
+    await logAdminAction('Admin Record Deleted', cleanEmail, 'Success');
   };
 
   // Helper: Create log helper
@@ -640,6 +780,8 @@ export default function App() {
 
   // Asset action handlers
   const handleSaveAsset = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'register new assets');
+
     if (!assetForm.name || !assetForm.serial) {
       alert('Item Name and unique Serial Number are required.');
       return;
@@ -701,6 +843,10 @@ export default function App() {
   };
 
   const handleOpenEditAsset = (serial: string) => {
+    if (!isSuperAdmin) {
+      alert('Read-Only mode: Modifying assets requires Super Admin authority.');
+      return;
+    }
     const a = assets.find(x => x.serial === serial);
     if (!a) return;
     setEditingSerial(serial);
@@ -723,6 +869,7 @@ export default function App() {
   };
 
   const handleUpdateAsset = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'update asset records');
     if (!editingSerial) return;
     const original = assets.find(x => x.serial === editingSerial);
     if (!original) return;
@@ -777,6 +924,7 @@ export default function App() {
   };
 
   const handleDeleteAsset = async (serial: string) => {
+    assertSuperAdmin(user?.email, adminsList, 'delete asset records');
     const updated = assets.filter(a => a.serial !== serial);
     setAssets(updated);
     await runSheetSync(async (sheetId, activeToken) => {
@@ -786,6 +934,7 @@ export default function App() {
   };
 
   const handleBulkDelete = async (serials: string[]) => {
+    assertSuperAdmin(user?.email, adminsList, 'bulk delete asset records');
     const updated = assets.filter(a => !serials.includes(a.serial));
     setAssets(updated);
     await runSheetSync(async (sheetId, activeToken) => {
@@ -798,6 +947,8 @@ export default function App() {
 
   // Issue Gate Pass handlers
   const handleIssueGatePass = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'issue new gate passes');
+
     if (gpSelectedSerials.size === 0) {
       alert('Select at least one asset for this gate pass.');
       return;
@@ -814,7 +965,9 @@ export default function App() {
       company: gpForm.company || 'AFMV Logistics Pvt. Ltd.',
       serials: Array.from(gpSelectedSerials),
       origin: gpForm.origin,
+      originAddress: gpForm.originAddress ? gpForm.originAddress.trim() : undefined,
       dest: gpForm.dest,
+      destAddress: gpForm.destAddress ? gpForm.destAddress.trim() : undefined,
       shipDate: gpForm.shipDate,
       eta: gpForm.eta,
       receiver: gpForm.receiver || '—',
@@ -941,7 +1094,7 @@ export default function App() {
     // Reset Form
     setGpSelectedSerials(new Set());
     setGpForm({
-      company: 'AFMV Logistics Pvt. Ltd.', type: 'outbound', origin: 'Bangalore', dest: '',
+      company: 'AFMV Logistics Pvt. Ltd.', type: 'outbound', origin: 'Bangalore', originAddress: '', dest: '', destAddress: '',
       shipDate: new Date().toISOString().split('T')[0], eta: '', receiver: '', possessor: '',
       newStatus: 'In Transit', notes: '', driverName: '', driverContact: '', vehicleNumber: ''
     });
@@ -1028,6 +1181,8 @@ export default function App() {
   };
 
   const handleConfirmImport = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'import asset spreadsheets');
+
     // Skip duplicate serials
     const uniqueIncoming = pendingImportData.filter(incoming => {
       return !assets.some(existing => existing.serial.toLowerCase() === incoming.serial.toLowerCase());
@@ -1085,6 +1240,8 @@ export default function App() {
 
   // Super Admin complete cleanup
   const handleWipeDatabase = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'execute database hard reset');
+
     const answer = prompt('Type "WIPE" to completely format your database and reset it with default template records:');
     if (answer === 'WIPE') {
       setIsSyncing(true);
@@ -1155,6 +1312,19 @@ export default function App() {
     );
   }
 
+  // If user is signed in but not authorized in RBAC registry
+  if (user && !isAuthorized) {
+    return (
+      <AccessDeniedView 
+        userEmail={user.email || 'Unknown'}
+        isRevoked={isRevoked}
+        onLogout={handleLogout}
+        onRefreshAuth={() => pullFromGoogleSheets()}
+        isChecking={isSyncing}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] flex flex-col font-sans text-[#2D3436]">
       
@@ -1177,16 +1347,25 @@ export default function App() {
 
         {/* User profile & controls */}
         <div className="flex items-center gap-3">
-          {/* Static Role Badge */}
+          {/* RBAC Role Badge */}
           <div
-            className={`px-3 py-1.5 rounded-full text-[10px] md:text-xs font-bold flex items-center gap-1 border ${
-              isAdmin 
+            className={`px-3 py-1.5 rounded-full text-[10px] md:text-xs font-bold flex items-center gap-1.5 border ${
+              isSuperAdmin 
                 ? 'bg-purple-50 text-purple-700 border-purple-200' 
-                : 'bg-[#F1F3F5] text-[#636E72] border-[#DEE2E6]'
+                : 'bg-sky-50 text-sky-700 border-sky-200'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" />
-            {isAdmin ? '🔐 Super Admin' : 'Field Staff'}
+            {isSuperAdmin ? (
+              <>
+                <Lock className="w-3.5 h-3.5 text-purple-600" />
+                <span>Super Admin</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5 text-sky-600" />
+                <span>Admin (Read-Only)</span>
+              </>
+            )}
           </div>
 
           {/* User initials */}
@@ -1303,19 +1482,19 @@ export default function App() {
             </div>
 
             {/* Admin only subcategories */}
-            <div className="space-y-1.5 pt-4 border-t border-[#E9ECEF]">
-              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-widest px-3 mb-2 font-sans">Import & Tools</div>
-              
-              <button 
-                onClick={() => { setActiveTab('import'); setMobileMenuOpen(false); }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
-                  activeTab === 'import' ? 'bg-[#6C5CE7] text-white' : 'text-[#636E72] hover:bg-[#F8F9FA] hover:text-[#2D3436]'
-                }`}
-              >
-                <FileSpreadsheet className="w-4 h-4 shrink-0" /> Bulk Import
-              </button>
+            {isSuperAdmin && (
+              <div className="space-y-1.5 pt-4 border-t border-[#E9ECEF]">
+                <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-widest px-3 mb-2 font-sans">Enterprise Tools</div>
+                
+                <button 
+                  onClick={() => { setActiveTab('import'); setMobileMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
+                    activeTab === 'import' ? 'bg-[#6C5CE7] text-white' : 'text-[#636E72] hover:bg-[#F8F9FA] hover:text-[#2D3436]'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-4 h-4 shrink-0" /> Bulk Import
+                </button>
 
-              {isAdmin && (
                 <button 
                   onClick={() => { setActiveTab('superadmin'); setMobileMenuOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold tracking-tight transition ${
@@ -1324,8 +1503,8 @@ export default function App() {
                 >
                   <Shield className="w-4 h-4 shrink-0" /> Super Admin
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
           </div>
         </aside>
@@ -1344,7 +1523,7 @@ export default function App() {
                 {activeTab === 'audit' && 'System Audit Trail'}
                 {activeTab === 'campaigns' && 'Client Campaigns'}
                 {activeTab === 'import' && 'XLSX Spreadsheet Importer'}
-                {activeTab === 'superadmin' && 'Enterprise Admin controls'}
+                {activeTab === 'superadmin' && 'Enterprise Admin Controls'}
               </h2>
               <p className="text-xs text-[#636E72] font-medium">
                 {activeTab === 'dashboard' && 'Live warehouse statistics, brand ratios, and logs.'}
@@ -1354,42 +1533,69 @@ export default function App() {
                 {activeTab === 'audit' && 'Track historical updates per asset.'}
                 {activeTab === 'campaigns' && 'Monitor event budgets, schedules, and deployments.'}
                 {activeTab === 'import' && 'Upload existing spreadsheet data with headers validation.'}
-                {activeTab === 'superadmin' && 'Execute hard wipes, snapshot archives, or master backups.'}
+                {activeTab === 'superadmin' && 'Manage Admin permissions, RBAC roles, audit logs, and master backups.'}
               </p>
             </div>
 
             {/* Quick Action buttons */}
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setAssetForm({
-                    name: '', serial: '', brand: '', desc: '', qty: 1, city: 'Bangalore',
-                    owner: '', possessor: '', status: 'In House', campaign: '',
-                    receivedBy: '', receivedOn: new Date().toISOString().split('T')[0]
-                  });
-                  setAddAssetOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-[#F8F9FA] text-[#2D3436] border border-[#DEE2E6] rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-[#6C5CE7]" /> Register Asset
-              </button>
-              
-              <button
-                onClick={() => {
-                  setGpSelectedSerials(new Set());
-                  setGpForm({
-                    company: 'AFMV Logistics Pvt. Ltd.', type: 'outbound', origin: 'Bangalore', dest: '',
-                    shipDate: new Date().toISOString().split('T')[0], eta: '', receiver: '', possessor: '',
-                    newStatus: 'In Transit', notes: ''
-                  });
-                  setGatePassOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
-              >
-                <Truck className="w-4 h-4 text-white" /> New Gate Pass
-              </button>
+              {isSuperAdmin ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setAssetForm({
+                        name: '', serial: '', brand: '', desc: '', qty: 1, city: 'Bangalore',
+                        owner: '', possessor: '', status: 'In House', campaign: '',
+                        receivedBy: '', receivedOn: new Date().toISOString().split('T')[0]
+                      });
+                      setAddAssetOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-[#F8F9FA] text-[#2D3436] border border-[#DEE2E6] rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 text-[#6C5CE7]" /> Register Asset
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setGpSelectedSerials(new Set());
+                      setGpForm({
+                        company: 'AFMV Logistics Pvt. Ltd.', type: 'outbound', origin: 'Bangalore', dest: '',
+                        shipDate: new Date().toISOString().split('T')[0], eta: '', receiver: '', possessor: '',
+                        newStatus: 'In Transit', notes: ''
+                      });
+                      setGatePassOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
+                  >
+                    <Truck className="w-4 h-4 text-white" /> New Gate Pass
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-sky-50 text-sky-800 border border-sky-200 rounded-xl text-xs font-semibold">
+                  <Eye className="w-4 h-4 text-sky-600" />
+                  <span>Read-Only Mode</span>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Read-Only Notice Banner for Admin role */}
+          {isAdminReadOnly && (
+            <div className="mb-6 p-4 bg-sky-50/80 border border-sky-200 rounded-2xl flex items-center justify-between text-xs text-sky-950 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-100 flex items-center justify-center text-sky-700 font-bold shrink-0">
+                  <Eye className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-sky-900">Admin Read-Only Inspection Mode</p>
+                  <p className="text-sky-700 text-[11px]">You can search, filter, and inspect all records. Asset updates, gate passes, dispatches, and spreadsheet modifications are restricted to Super Admins.</p>
+                </div>
+              </div>
+              <span className="font-mono text-[10px] bg-white border border-sky-200 text-sky-800 px-3 py-1 rounded-full font-bold uppercase tracking-wider shrink-0">
+                Read Only
+              </span>
+            </div>
+          )}
 
           {/* Active Tab Router */}
           <div className="transition-all duration-300">
@@ -1404,7 +1610,7 @@ export default function App() {
             {activeTab === 'assets' && (
               <AssetsView 
                 assets={assets}
-                isAdmin={isAdmin}
+                isAdmin={isSuperAdmin}
                 onEditAsset={handleOpenEditAsset}
                 onDeleteAsset={handleDeleteAsset}
                 onBulkDelete={handleBulkDelete}
@@ -1438,6 +1644,7 @@ export default function App() {
                 }}
                 userEmail={user?.email}
                 onOpenGatePassPreview={handleOpenPreviewGp}
+                isSuperAdmin={isSuperAdmin}
               />
             )}
 
@@ -1454,7 +1661,7 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'import' && (
+            {isSuperAdmin && activeTab === 'import' && (
               <div className="space-y-6">
                 
                 {/* Drag and Drop card */}
@@ -1499,7 +1706,7 @@ export default function App() {
               </div>
             )}
 
-            {isAdmin && activeTab === 'superadmin' && (
+            {isSuperAdmin && activeTab === 'superadmin' && (
               <div className="space-y-6">
                 
                 {/* Google Sheets Sync Widget */}
@@ -1511,7 +1718,8 @@ export default function App() {
                   onSync={() => triggerSheetsSync()}
                   onPull={() => pullFromGoogleSheets()}
                   onPush={() => pushToGoogleSheets()}
-                  isAdmin={isAdmin}
+                  isAdmin={isSuperAdmin}
+                  isSuperAdmin={isSuperAdmin}
                   syncError={syncError}
                   counts={{
                     assets: assets.length,
@@ -1523,227 +1731,19 @@ export default function App() {
                   }}
                 />
 
-                {/* 1. TOP ROW: USER MANAGER */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  
-                  {/* Left panel: Grant Authority */}
-                  <div className="lg:col-span-1 bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold font-display text-[#2D3436] mb-2">Grant Authority</h3>
-                      <p className="text-xs text-[#636E72] leading-relaxed mb-4">
-                        Add a new Super Admin user by their registered Google/Gmail account. They will instantly gain enterprise management and spreadsheet capabilities.
-                      </p>
-                      
-                      <form onSubmit={async (e) => {
-                        e.preventDefault();
-                        const form = e.currentTarget;
-                        const emailInput = form.elements.namedItem('adminEmail') as HTMLInputElement;
-                        const email = emailInput.value.trim().toLowerCase();
-                        if (!email) return;
-                        if (!email.includes('@')) {
-                          alert('Please enter a valid email address');
-                          return;
-                        }
-                        if (adminsList.some(a => a.email.toLowerCase() === email)) {
-                          alert('This email already has Super Admin access');
-                          return;
-                        }
-                        
-                        const nextAdmins = [
-                          ...adminsList,
-                          {
-                            email,
-                            role: 'Super Admin',
-                            grantedBy: user?.email || 'System',
-                            grantedOn: new Date().toISOString().split('T')[0]
-                          }
-                        ];
-                        
-                        setAdminsList(nextAdmins);
-                        await runSheetSync(async (sheetId, activeToken) => {
-                          await saveAdminsSheet(sheetId, activeToken, nextAdmins);
-                        });
-                        await logAdminAction('Granted Super Admin', email);
-                        emailInput.value = '';
-                        alert(`Super Admin authority granted successfully to ${email}`);
-                      }} className="space-y-3">
-                        <div>
-                          <label className="block text-xs font-semibold text-[#636E72] mb-1">Gmail Account *</label>
-                          <input 
-                            name="adminEmail"
-                            type="email" 
-                            required
-                            placeholder="user@example.com"
-                            className="w-full px-3 py-2 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                        >
-                          <Shield className="w-4 h-4" /> Grant Super Admin Role
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-
-                  {/* Right panel: Authorized Admins Registry */}
-                  <div className="lg:col-span-2 bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm">
-                    <h3 className="text-lg font-bold font-display text-[#2D3436] mb-2">Enterprise Administrators</h3>
-                    <p className="text-xs text-[#636E72] leading-relaxed mb-4">
-                      A list of Gmail accounts with exclusive access to the system ledger sheets, imports, and core formatting tools.
-                    </p>
-                    
-                    <div className="overflow-x-auto border border-[#E9ECEF] rounded-2xl">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-[#F8F9FA] border-b border-[#E9ECEF] text-[#636E72] font-semibold uppercase tracking-wider text-[10px]">
-                            <th className="p-3">Gmail Account</th>
-                            <th className="p-3">Authorized Role</th>
-                            <th className="p-3">Assigned By</th>
-                            <th className="p-3">Date Granted</th>
-                            <th className="p-3 text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#E9ECEF] font-medium text-[#2D3436]">
-                          {adminsList.map((admin) => (
-                            <tr key={admin.email} className="hover:bg-[#F8F9FA]/50 transition">
-                              <td className="p-3 font-mono font-bold text-[#2D3436]">{admin.email}</td>
-                              <td className="p-3">
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 text-purple-700 text-[10px] font-bold rounded-full border border-purple-100">
-                                  🔐 Super Admin
-                                </span>
-                              </td>
-                              <td className="p-3 text-[#636E72]">{admin.grantedBy}</td>
-                              <td className="p-3 font-mono text-xs text-[#636E72]">{admin.grantedOn}</td>
-                              <td className="p-3 text-right">
-                                {admin.email.toLowerCase() === 'aditya@aftermathventures.in' ? (
-                                  <span className="text-[10px] text-[#ADB5BD] italic">Primary Owner</span>
-                                ) : (
-                                  <button
-                                    onClick={async () => {
-                                      if (window.confirm(`Are you sure you want to revoke Super Admin status from ${admin.email}?`)) {
-                                        const nextAdmins = adminsList.filter(a => a.email.toLowerCase() !== admin.email.toLowerCase());
-                                        setAdminsList(nextAdmins);
-                                        await runSheetSync(async (sheetId, activeToken) => {
-                                          await saveAdminsSheet(sheetId, activeToken, nextAdmins);
-                                        });
-                                        await logAdminAction('Revoked Super Admin', admin.email);
-                                        alert(`Authority successfully revoked from ${admin.email}`);
-                                      }
-                                    }}
-                                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg text-[10px] font-bold transition"
-                                  >
-                                    Revoke
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* 2. MIDDLE ROW: ADMINISTRATIVE LOGS */}
-                <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-bold font-display text-[#2D3436]">Administrative Activity & Sign-in Logs</h3>
-                    <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold font-mono uppercase px-2.5 py-1 rounded-full">
-                      Traceability Ledger
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#636E72] mb-4">
-                    Audit trail of all administrative actions, sign-in sessions, promotions, and revokes across the entire cloud integration.
-                  </p>
-                  
-                  <div className="overflow-x-auto border border-[#E9ECEF] rounded-2xl max-h-[350px] overflow-y-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="sticky top-0 z-10 bg-[#F8F9FA] shadow-[0_1px_0_0_#E9ECEF]">
-                        <tr className="text-[#636E72] font-semibold uppercase tracking-wider text-[10px]">
-                          <th className="p-3">Timestamp</th>
-                          <th className="p-3">Action Type</th>
-                          <th className="p-3">Target / Entity</th>
-                          <th className="p-3">Performed By</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#E9ECEF] font-medium text-[#2D3436]">
-                        {adminLogs.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="p-6 text-center text-[#ADB5BD] italic">
-                              No admin action records loaded. Sign in or grant privileges to generate logs.
-                            </td>
-                          </tr>
-                        ) : (
-                          adminLogs.map((log, index) => (
-                            <tr key={index} className="hover:bg-[#F8F9FA]/30 transition text-xs">
-                              <td className="p-3 font-mono text-[#636E72] whitespace-nowrap">{log.timestamp}</td>
-                              <td className="p-3">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                  log.action.includes('Granted') 
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                    : log.action.includes('Revoked')
-                                    ? 'bg-red-50 text-red-700 border-red-100'
-                                    : log.action.includes('Wipe')
-                                    ? 'bg-amber-50 text-amber-700 border-amber-100'
-                                    : 'bg-blue-50 text-blue-700 border-blue-100'
-                                }`}>
-                                  {log.action}
-                                </span>
-                              </td>
-                              <td className="p-3 font-mono font-bold text-[#2D3436]">{log.targetEmail}</td>
-                              <td className="p-3 font-mono text-xs text-[#636E72]">{log.performedBy}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* 3. BOTTOM ROW: UTILITY CARDS */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  
-                  {/* Backups card */}
-                  <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold font-display text-[#2D3436] mb-2">Spreadsheet Exports & Backups</h3>
-                      <p className="text-xs text-[#636E72] leading-relaxed mb-4">
-                        Create complete, multi-tab snapshots of your system state including all Assets, Audit histories, and Gate Passes.
-                      </p>
-                    </div>
-                    <button
-                      onClick={handleExportAll}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                    >
-                      <FileSpreadsheet className="w-4 h-4" /> Export Complete Database Snapshot (.xlsx)
-                    </button>
-                  </div>
-
-                  {/* Wipe card */}
-                  <div className="bg-white border border-red-100 rounded-3xl p-6 shadow-sm flex flex-col justify-between border-l-4 border-l-red-500">
-                    <div>
-                      <h3 className="text-lg font-bold font-display text-red-950 mb-2">Hard Reset & Format</h3>
-                      <p className="text-xs text-[#636E72] leading-relaxed mb-4">
-                        Wipe the current database worksheets on the spreadsheet and load the clean default template. This deletes all existing log lists.
-                      </p>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        if (confirm('WARNING: This will delete ALL assets, gate passes, audit logs, campaigns, and user logs. This action is IRREVERSIBLE. Are you sure you want to perform a hard reset?')) {
-                          await handleWipeDatabase();
-                          await logAdminAction('Wiped Database Sheets', 'All Ledgers');
-                        }
-                      }}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-xl text-xs font-bold transition cursor-pointer"
-                    >
-                      <Archive className="w-4 h-4" /> Wipe Sheet & Reset defaults
-                    </button>
-                  </div>
-
-                </div>
+                {/* Enterprise Admin View component */}
+                <EnterpriseAdminView 
+                  adminsList={adminsList}
+                  adminLogs={adminLogs}
+                  currentUserEmail={user?.email || ''}
+                  onGrantAdmin={handleGrantAdmin}
+                  onRevokeAdmin={handleRevokeAdmin}
+                  onRestoreAdmin={handleRestoreAdmin}
+                  onChangeRole={handleChangeAdminRole}
+                  onDeleteRecord={handleDeleteAdminRecord}
+                  onExportBackup={handleExportAll}
+                  onWipeDatabase={handleWipeDatabase}
+                />
 
               </div>
             )}
@@ -2218,12 +2218,34 @@ export default function App() {
                     </div>
 
                     <div>
+                      <label className="block text-xs font-semibold text-[#636E72] mb-1">Origin Address</label>
+                      <input 
+                        type="text" 
+                        placeholder="Origin street / facility address"
+                        value={gpForm.originAddress}
+                        onChange={(e) => setGpForm({...gpForm, originAddress: e.target.value})}
+                        className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
+                      />
+                    </div>
+
+                    <div>
                       <label className="block text-xs font-semibold text-[#636E72] mb-1">Destination *</label>
                       <input 
                         type="text" 
                         placeholder="e.g. Delhi Site"
                         value={gpForm.dest}
                         onChange={(e) => setGpForm({...gpForm, dest: e.target.value})}
+                        className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#636E72] mb-1">Destination Address</label>
+                      <input 
+                        type="text" 
+                        placeholder="Destination street / site address"
+                        value={gpForm.destAddress}
+                        onChange={(e) => setGpForm({...gpForm, destAddress: e.target.value})}
                         className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
                       />
                     </div>
@@ -2444,18 +2466,28 @@ export default function App() {
 
                 {/* Route Arrow Panel */}
                 <div className="flex justify-between items-center bg-[#F8F9FA] rounded-2xl p-5 border border-[#E9ECEF] mb-6 text-center">
-                  <div className="flex-1">
-                    <span className="text-[10px] text-[#ADB5BD] font-semibold uppercase font-sans">Origin point</span>
-                    <span className="block font-bold text-[#2D3436] text-sm mt-0.5">{previewingGp.origin}</span>
+                  <div className="flex-1 px-3">
+                    <span className="text-[10px] text-[#ADB5BD] font-semibold uppercase font-sans tracking-wider">Origin point</span>
+                    <span className="block font-bold text-[#2D3436] text-base mt-0.5">{previewingGp.origin}</span>
+                    {previewingGp.originAddress && (
+                      <span className="block text-xs text-[#636E72] font-normal mt-1 leading-relaxed break-words">
+                        {previewingGp.originAddress}
+                      </span>
+                    )}
                   </div>
-                  <div className="px-4 text-[#6C5CE7]">
+                  <div className="px-4 text-[#6C5CE7] shrink-0">
                     <svg className="w-6 h-6 transform rotate-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                     </svg>
                   </div>
-                  <div className="flex-1">
-                    <span className="text-[10px] text-[#ADB5BD] font-semibold uppercase font-sans">Destination point</span>
-                    <span className="block font-bold text-[#2D3436] text-sm mt-0.5">{previewingGp.dest}</span>
+                  <div className="flex-1 px-3">
+                    <span className="text-[10px] text-[#ADB5BD] font-semibold uppercase font-sans tracking-wider">Destination point</span>
+                    <span className="block font-bold text-[#2D3436] text-base mt-0.5">{previewingGp.dest}</span>
+                    {previewingGp.destAddress && (
+                      <span className="block text-xs text-[#636E72] font-normal mt-1 leading-relaxed break-words">
+                        {previewingGp.destAddress}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2477,6 +2509,25 @@ export default function App() {
                     <span className="text-[#ADB5BD] block font-medium">Post Status</span>
                     <span className="font-bold text-[#6C5CE7]">{previewingGp.newStatus}</span>
                   </div>
+                  {(previewingGp.driverName || previewingGp.vehicleNumber || previewingGp.driverContact) && (
+                    <div className="col-span-2 md:col-span-4 pt-2 border-t border-[#DEE2E6] flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                      {previewingGp.driverName && (
+                        <div><span className="text-[#ADB5BD] font-medium">Driver:</span> <strong className="text-[#2D3436]">{previewingGp.driverName}</strong></div>
+                      )}
+                      {previewingGp.driverContact && (
+                        <div><span className="text-[#ADB5BD] font-medium">Contact:</span> <strong className="text-[#2D3436] font-mono">{previewingGp.driverContact}</strong></div>
+                      )}
+                      {previewingGp.vehicleNumber && (
+                        <div><span className="text-[#ADB5BD] font-medium">Vehicle:</span> <strong className="text-[#2D3436] font-mono">{previewingGp.vehicleNumber}</strong></div>
+                      )}
+                    </div>
+                  )}
+                  {previewingGp.notes && (
+                    <div className="col-span-2 md:col-span-4 pt-2 border-t border-[#DEE2E6] text-xs">
+                      <span className="text-[#ADB5BD] font-medium block">Dispatch Notes:</span>
+                      <p className="text-[#2D3436] mt-0.5 italic">{previewingGp.notes}</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Associated items Table */}
