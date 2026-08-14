@@ -1,13 +1,15 @@
-import React from 'react';
-import { ShieldAlert, RefreshCw, LogOut, Mail, Lock, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShieldAlert, RefreshCw, LogOut, Mail, Lock, CheckCircle2, Link2, Database, ChevronDown, ChevronUp } from 'lucide-react';
 import { PRIMARY_SUPER_ADMIN_EMAIL } from '../lib/auth';
 
 interface AccessDeniedViewProps {
   userEmail: string;
   isRevoked?: boolean;
   onLogout: () => void;
-  onRefreshAuth: () => void;
+  onRefreshAuth: (customSheetId?: string) => Promise<any> | void;
   isChecking?: boolean;
+  currentSpreadsheetId?: string | null;
+  adminsCount?: number;
 }
 
 export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
@@ -15,14 +17,39 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
   isRevoked,
   onLogout,
   onRefreshAuth,
-  isChecking = false
+  isChecking = false,
+  currentSpreadsheetId,
+  adminsCount = 0
 }) => {
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showConnectSheet, setShowConnectSheet] = useState(false);
+  const [sheetInput, setSheetInput] = useState('');
+  const [connectMsg, setConnectMsg] = useState<string | null>(null);
 
   const handleCopyEmail = () => {
     navigator.clipboard.writeText(PRIMARY_SUPER_ADMIN_EMAIL);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleConnectCustomSheet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sheetInput.trim()) return;
+
+    let targetId = sheetInput.trim();
+    // Extract ID from URL if full Google Sheets link was pasted
+    const match = targetId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match && match[1]) {
+      targetId = match[1];
+    }
+
+    setConnectMsg('Connecting and verifying spreadsheet...');
+    try {
+      await onRefreshAuth(targetId);
+      setConnectMsg(null);
+    } catch (err: any) {
+      setConnectMsg(`Connection failed: ${err.message || 'Unable to load spreadsheet'}`);
+    }
   };
 
   return (
@@ -66,15 +93,67 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
         </p>
 
         {/* Account Info Box */}
-        <div className="bg-[#F8F9FA] border border-[#E9ECEF] rounded-2xl p-4 text-left text-xs mb-6 space-y-2">
+        <div className="bg-[#F8F9FA] border border-[#E9ECEF] rounded-2xl p-4 text-left text-xs mb-4 space-y-2">
           <div>
             <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Signed-In Google Account</div>
             <div className="font-mono font-bold text-[#2D3436] break-all">{userEmail}</div>
           </div>
-          <div className="pt-2 border-t border-[#E9ECEF]">
-            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Assigned Role</div>
-            <div className="font-semibold text-rose-600">Unauthorized / No Access</div>
+          <div className="pt-2 border-t border-[#E9ECEF] flex items-center justify-between">
+            <div>
+              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Assigned Role</div>
+              <div className="font-semibold text-rose-600">
+                {isRevoked ? 'Revoked' : 'Unauthorized / No Access'}
+              </div>
+            </div>
+            {adminsCount > 0 && (
+              <div className="text-right">
+                <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Known Admins</div>
+                <div className="font-mono font-bold text-[#2D3436]">{adminsCount} loaded</div>
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Connect Spreadsheet Accordion (For multi-user team sync) */}
+        <div className="mb-4 text-left">
+          <button
+            type="button"
+            onClick={() => setShowConnectSheet(!showConnectSheet)}
+            className="w-full flex items-center justify-between px-3.5 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 transition cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-[#6C5CE7]" />
+              {currentSpreadsheetId ? 'Connected to Google Sheet' : 'Connect Master Spreadsheet ID'}
+            </span>
+            {showConnectSheet ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+
+          {showConnectSheet && (
+            <form onSubmit={handleConnectCustomSheet} className="mt-2 p-3 bg-white border border-gray-200 rounded-xl space-y-2">
+              <div className="text-[11px] text-gray-500">
+                Paste the master Google Sheet URL or ID if this account was just granted access:
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  value={sheetInput}
+                  onChange={(e) => setSheetInput(e.target.value)}
+                  className="flex-1 px-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#6C5CE7]"
+                />
+                <button
+                  type="submit"
+                  disabled={isChecking || !sheetInput.trim()}
+                  className="px-3 py-1.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white text-xs font-bold rounded-lg transition disabled:opacity-50 cursor-pointer"
+                >
+                  Connect
+                </button>
+              </div>
+              {connectMsg && (
+                <div className="text-[11px] text-purple-700 font-medium">{connectMsg}</div>
+              )}
+            </form>
+          )}
         </div>
 
         {/* Request Access Help */}
@@ -100,9 +179,9 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
         {/* Action Controls */}
         <div className="space-y-2.5">
           <button
-            onClick={onRefreshAuth}
+            onClick={() => onRefreshAuth()}
             disabled={isChecking}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-60 active:scale-98"
           >
             <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
             {isChecking ? 'Re-checking permissions...' : 'Check Authorization Again'}

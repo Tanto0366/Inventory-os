@@ -46,12 +46,13 @@ import {
   saveCampaignsSheet,
   saveAdminsSheet,
   appendAdminLog,
+  shareSpreadsheetWithUser,
   syncFullDatabase,
   ensureSpreadsheetSchema,
   getSampleSheetData
 } from './lib/googleSheets';
 import { expandAssetsWithQuantities } from './lib/assetUtils';
-import { evaluateUserAuth, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail } from './lib/auth';
+import { evaluateUserAuth, getUserRole, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail } from './lib/auth';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -523,9 +524,17 @@ export default function App() {
           localStorage.setItem('inventory_os_token', result.accessToken);
         } catch {}
 
-        // Pull latest sheet data to evaluate live permissions
+        // Pull latest sheet data to evaluate live permissions directly from Google Sheet
         const sheetData = await pullFromGoogleSheets(result.accessToken);
-        const liveAdmins = sheetData?.admins || adminsList;
+        const liveAdmins = (sheetData?.admins && sheetData.admins.length > 0) ? sheetData.admins : adminsList;
+        
+        if (sheetData?.admins && sheetData.admins.length > 0) {
+          setAdminsList(sheetData.admins);
+          try {
+            localStorage.setItem('inventory_os_admins', JSON.stringify(sheetData.admins));
+          } catch {}
+        }
+
         const currentAuth = evaluateUserAuth(result.user.email, liveAdmins);
 
         const log: AdminLog = {
@@ -664,8 +673,23 @@ export default function App() {
       }
     ];
     setAdminsList(nextAdmins);
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(nextAdmins));
+    } catch {}
+
     await runSheetSync(async (sheetId, activeToken) => {
+      // 1. Write to Google Sheet
       await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+      // 2. Auto-share Google Drive file permission with the granted user
+      await shareSpreadsheetWithUser(sheetId, activeToken, cleanEmail, role === 'Super Admin' ? 'writer' : 'reader');
+      // 3. Re-read sheet as single source of truth
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+        try {
+          localStorage.setItem('inventory_os_admins', JSON.stringify(reloaded.admins));
+        } catch {}
+      }
     });
     await logAdminAction(`Admin Access Granted (${role})`, cleanEmail, 'Success');
   };
@@ -689,8 +713,19 @@ export default function App() {
       return a;
     });
     setAdminsList(nextAdmins);
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(nextAdmins));
+    } catch {}
+
     await runSheetSync(async (sheetId, activeToken) => {
       await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+        try {
+          localStorage.setItem('inventory_os_admins', JSON.stringify(reloaded.admins));
+        } catch {}
+      }
     });
     await logAdminAction('Admin Access Revoked', cleanEmail, 'Success');
   };
@@ -710,8 +745,20 @@ export default function App() {
       return a;
     });
     setAdminsList(nextAdmins);
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(nextAdmins));
+    } catch {}
+
     await runSheetSync(async (sheetId, activeToken) => {
       await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+      await shareSpreadsheetWithUser(sheetId, activeToken, cleanEmail, 'writer');
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+        try {
+          localStorage.setItem('inventory_os_admins', JSON.stringify(reloaded.admins));
+        } catch {}
+      }
     });
     await logAdminAction('Admin Access Restored', cleanEmail, 'Success');
   };
@@ -735,8 +782,20 @@ export default function App() {
       return a;
     });
     setAdminsList(nextAdmins);
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(nextAdmins));
+    } catch {}
+
     await runSheetSync(async (sheetId, activeToken) => {
       await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+      await shareSpreadsheetWithUser(sheetId, activeToken, cleanEmail, newRole === 'Super Admin' ? 'writer' : 'reader');
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+        try {
+          localStorage.setItem('inventory_os_admins', JSON.stringify(reloaded.admins));
+        } catch {}
+      }
     });
     await logAdminAction(`Admin Role Changed to ${newRole}`, cleanEmail, 'Success');
   };
@@ -750,8 +809,19 @@ export default function App() {
     }
     const nextAdmins = adminsList.filter(a => normalizeEmail(a.email) !== cleanEmail);
     setAdminsList(nextAdmins);
+    try {
+      localStorage.setItem('inventory_os_admins', JSON.stringify(nextAdmins));
+    } catch {}
+
     await runSheetSync(async (sheetId, activeToken) => {
       await saveAdminsSheet(sheetId, activeToken, nextAdmins);
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+        try {
+          localStorage.setItem('inventory_os_admins', JSON.stringify(reloaded.admins));
+        } catch {}
+      }
     });
     await logAdminAction('Admin Record Deleted', cleanEmail, 'Success');
   };
@@ -1319,8 +1389,12 @@ export default function App() {
         userEmail={user.email || 'Unknown'}
         isRevoked={isRevoked}
         onLogout={handleLogout}
-        onRefreshAuth={() => pullFromGoogleSheets()}
+        onRefreshAuth={async (customSheetId?: string) => {
+          await pullFromGoogleSheets(token, customSheetId);
+        }}
         isChecking={isSyncing}
+        currentSpreadsheetId={spreadsheetId}
+        adminsCount={adminsList.length}
       />
     );
   }

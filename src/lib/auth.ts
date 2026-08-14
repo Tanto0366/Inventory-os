@@ -2,7 +2,7 @@ import { AdminUser } from '../types';
 
 export const PRIMARY_SUPER_ADMIN_EMAIL = 'aditya@aftermathventures.in';
 
-export type UserRole = 'Super Admin' | 'Admin' | 'Unauthorized';
+export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'REVOKED' | 'UNAUTHORIZED';
 
 export interface AuthStatus {
   isAuthorized: boolean;
@@ -10,86 +10,107 @@ export interface AuthStatus {
   isAdminReadOnly: boolean;
   isProtectedSuperAdmin: boolean;
   isRevoked: boolean;
-  role: UserRole;
+  role: 'Super Admin' | 'Admin' | 'Unauthorized';
+  userRole: UserRole;
   matchedAdminRecord?: AdminUser;
 }
 
+/**
+ * Normalizes email address by trimming whitespace and converting to lowercase.
+ */
 export function normalizeEmail(email?: string | null): string {
   return (email || '').trim().toLowerCase();
 }
 
 /**
+ * Single source of truth for resolving user authorization roles.
+ * Resolves: SUPER_ADMIN | ADMIN | REVOKED | UNAUTHORIZED
+ */
+export function getUserRole(
+  email: string | undefined | null,
+  adminsList: AdminUser[] = []
+): UserRole {
+  const normalized = normalizeEmail(email);
+  if (!normalized) {
+    return 'UNAUTHORIZED';
+  }
+
+  // 1. Check Primary Protected Super Admin
+  if (normalized === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
+    return 'SUPER_ADMIN';
+  }
+
+  // 2. Check Admin Table with normalized email matching
+  const record = adminsList.find(
+    admin => normalizeEmail(admin.email) === normalized
+  );
+
+  if (!record) {
+    return 'UNAUTHORIZED';
+  }
+
+  // 3. Check explicit revoked status
+  const statusStr = (record.status || '').trim().toLowerCase();
+  if (statusStr === 'revoked') {
+    return 'REVOKED';
+  }
+
+  // 4. Resolve role
+  const roleStr = (record.role || '').trim().toLowerCase();
+  if (roleStr === 'super admin' || roleStr.includes('super')) {
+    return 'SUPER_ADMIN';
+  }
+
+  if (
+    roleStr === 'admin' ||
+    roleStr === 'read-only admin' ||
+    roleStr === 'read only' ||
+    roleStr === 'readonly' ||
+    roleStr === 'staff' ||
+    roleStr === 'user' ||
+    roleStr.includes('admin')
+  ) {
+    return 'ADMIN';
+  }
+
+  // Any verified, non-revoked record in the Admin ledger is granted Admin access
+  return 'ADMIN';
+}
+
+/**
  * Centrally evaluates user authorization and role based on the master Admin records.
  */
-export function evaluateUserAuth(userEmail: string | undefined | null, adminsList: AdminUser[]): AuthStatus {
+export function evaluateUserAuth(
+  userEmail: string | undefined | null,
+  adminsList: AdminUser[] = []
+): AuthStatus {
   const normEmail = normalizeEmail(userEmail);
-  if (!normEmail) {
-    return {
-      isAuthorized: false,
-      isSuperAdmin: false,
-      isAdminReadOnly: false,
-      isProtectedSuperAdmin: false,
-      isRevoked: false,
-      role: 'Unauthorized'
-    };
-  }
+  const userRole = getUserRole(userEmail, adminsList);
 
-  // Primary Super Admin is permanently protected and authorized
-  if (normEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
-    return {
-      isAuthorized: true,
-      isSuperAdmin: true,
-      isAdminReadOnly: false,
-      isProtectedSuperAdmin: true,
-      isRevoked: false,
-      role: 'Super Admin',
-      matchedAdminRecord: {
-        email: PRIMARY_SUPER_ADMIN_EMAIL,
-        role: 'Super Admin',
-        status: 'Protected',
-        grantedBy: 'System',
-        grantedOn: '2026-08-14',
-        lastLogin: new Date().toISOString().split('T')[0],
-        lastUpdated: new Date().toISOString().split('T')[0]
-      }
-    };
-  }
+  const isSuper = userRole === 'SUPER_ADMIN';
+  const isAdmin = userRole === 'ADMIN';
+  const isRevoked = userRole === 'REVOKED';
+  const isAuthorized = isSuper || isAdmin;
 
-  // Lookup in authorized admins database
   const matched = adminsList.find(a => normalizeEmail(a.email) === normEmail);
-  if (!matched) {
-    return {
-      isAuthorized: false,
-      isSuperAdmin: false,
-      isAdminReadOnly: false,
-      isProtectedSuperAdmin: false,
-      isRevoked: false,
-      role: 'Unauthorized'
-    };
-  }
 
-  // Check if access was explicitly revoked
-  if (matched.status === 'Revoked') {
-    return {
-      isAuthorized: false,
-      isSuperAdmin: false,
-      isAdminReadOnly: false,
-      isProtectedSuperAdmin: false,
-      isRevoked: true,
-      role: 'Unauthorized',
-      matchedAdminRecord: matched
-    };
-  }
-
-  const isSuper = matched.role === 'Super Admin';
   return {
-    isAuthorized: true,
+    isAuthorized,
     isSuperAdmin: isSuper,
-    isAdminReadOnly: !isSuper,
-    isProtectedSuperAdmin: false,
-    isRevoked: false,
-    role: isSuper ? 'Super Admin' : 'Admin',
-    matchedAdminRecord: matched
+    isAdminReadOnly: isAdmin,
+    isProtectedSuperAdmin: normEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL),
+    isRevoked,
+    role: isSuper ? 'Super Admin' : (isAdmin ? 'Admin' : 'Unauthorized'),
+    userRole,
+    matchedAdminRecord: matched || (normEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL) ? {
+      email: PRIMARY_SUPER_ADMIN_EMAIL,
+      role: 'Super Admin',
+      status: 'Protected',
+      grantedBy: 'System',
+      grantedOn: '2026-08-14',
+      lastLogin: new Date().toISOString().split('T')[0],
+      lastUpdated: new Date().toISOString().split('T')[0]
+    } : undefined)
   };
 }
 
@@ -108,3 +129,4 @@ export function assertSuperAdmin(
     throw new Error(errorMsg);
   }
 }
+

@@ -274,26 +274,78 @@ const SAMPLE_LOCATIONS: LocationInfo[] = [
   { city: 'Kochi', address: 'Event Warehouse, Kakkanad', type: 'Site' }
 ];
 
-// 1. Search for existing spreadsheet in user's Drive
+// 1. Search for existing spreadsheet in user's Drive (including shared files)
 export async function findSpreadsheet(token: string): Promise<string | null> {
   const query = `name = '${DATABASE_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
-  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
   
+  // Try wide search supporting shared files and all drives first
   try {
-    const res = await fetch(url, {
+    const wideUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,owners,modifiedTime)&orderBy=modifiedTime desc&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`;
+    const res = await fetch(wideUrl, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) {
-      await handleGoogleApiError(res, 'Failed to search Google Drive for InventoryOS_Database');
-    }
-    const data = await res.json();
-    if (data.files && data.files.length > 0) {
-      return data.files[0].id;
+    if (res.ok) {
+      const data = await res.json();
+      if (data.files && data.files.length > 0) {
+        return data.files[0].id;
+      }
     }
   } catch (e) {
-    console.warn('Network issue or search Drive error:', e);
+    console.warn('Wide drive search notice:', e);
   }
+
+  // Standard search fallback
+  try {
+    const standardUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,owners,modifiedTime)&orderBy=modifiedTime desc`;
+    const res = await fetch(standardUrl, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.files && data.files.length > 0) {
+        return data.files[0].id;
+      }
+    }
+  } catch (e) {
+    console.warn('Standard Drive search notice:', e);
+  }
+
   return null;
+}
+
+/**
+ * Grants Google Drive permission to a user so they can read/write the master spreadsheet.
+ */
+export async function shareSpreadsheetWithUser(
+  spreadsheetId: string,
+  token: string,
+  email: string,
+  role: 'writer' | 'reader' = 'writer'
+): Promise<boolean> {
+  try {
+    const url = `https://www.googleapis.com/drive/v3/files/${spreadsheetId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        role: role === 'writer' ? 'writer' : 'reader',
+        type: 'user',
+        emailAddress: email.trim().toLowerCase()
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Drive Share Warning] Failed to share spreadsheet with ${email}:`, errText);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[Drive Share Warning] Exception sharing spreadsheet with ${email}:`, err);
+    return false;
+  }
 }
 
 // In-memory cache for schema validation to avoid redundant API hits within 30s
@@ -1090,59 +1142,61 @@ function parseRowsToLocations(rows: any[][]): LocationInfo[] {
 }
 
 function parseRowsToAdmins(rows: any[][]): AdminUser[] {
-  if (!rows || rows.length <= 1) return [];
-  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  if (!rows || rows.length === 0) return [];
+  
+  // Detect if first row is header
+  const firstRowFirstCell = String(rows[0]?.[0] || '').trim().toLowerCase();
+  const isHeaderFirst = firstRowFirstCell === 'email' || firstRowFirstCell === 'user email';
+  const dataRows = isHeaderFirst ? rows.slice(1) : rows;
+  const header = (isHeaderFirst ? rows[0] : []).map(h => String(h || '').trim().toLowerCase());
   const hasStatus = header.includes('status');
 
-  return rows.slice(1).map(r => {
+  return dataRows.map(r => {
     const email = String(r[0] || '').trim();
-    if (!email) return null;
+    if (!email || email.toLowerCase() === 'email') return null;
 
     const isPrimary = email.toLowerCase() === 'aditya@aftermathventures.in';
-
-    if (hasStatus || r.length >= 5) {
-      const rawRole = String(r[1] || '').trim();
-      const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole === 'Super Admin') ? 'Super Admin' : 'Admin';
-      const rawStatus = String(r[2] || '').trim();
-      const status: 'Active' | 'Revoked' | 'Protected' = isPrimary 
-        ? 'Protected' 
-        : (rawStatus === 'Revoked' ? 'Revoked' : 'Active');
-      
-      return {
-        email,
-        role,
-        status,
-        grantedBy: String(r[3] || (isPrimary ? 'System' : 'Super Admin')).trim(),
-        grantedOn: String(r[4] || new Date().toISOString().split('T')[0]).trim(),
-        lastLogin: r[5] ? String(r[5]).trim() : undefined,
-        lastUpdated: r[6] ? String(r[6]).trim() : undefined
-      };
-    } else {
-      // Legacy 4-column [Email, Role, Granted By, Granted On]
-      const rawRole = String(r[1] || '').trim();
-      const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole === 'Super Admin') ? 'Super Admin' : 'Admin';
-      return {
-        email,
-        role,
-        status: (isPrimary ? 'Protected' : 'Active') as 'Active' | 'Revoked' | 'Protected',
-        grantedBy: String(r[2] || 'System').trim(),
-        grantedOn: String(r[3] || new Date().toISOString().split('T')[0]).trim(),
-        lastLogin: undefined,
-        lastUpdated: undefined
-      };
+    const rawRole = String(r[1] || '').trim().toLowerCase();
+    const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole.includes('super')) ? 'Super Admin' : 'Admin';
+    
+    // Check if status exists in 3rd column or based on header
+    let status: 'Active' | 'Revoked' | 'Protected' = isPrimary ? 'Protected' : 'Active';
+    if (hasStatus || r.length >= 3) {
+      const rawStatus = String(r[2] || '').trim().toLowerCase();
+      if (rawStatus === 'revoked') {
+        status = 'Revoked';
+      } else if (rawStatus === 'protected' || isPrimary) {
+        status = 'Protected';
+      } else {
+        status = 'Active';
+      }
     }
+
+    return {
+      email,
+      role,
+      status,
+      grantedBy: String(r[3] || (isPrimary ? 'System' : 'Super Admin')).trim(),
+      grantedOn: String(r[4] || new Date().toISOString().split('T')[0]).trim(),
+      lastLogin: r[5] ? String(r[5]).trim() : undefined,
+      lastUpdated: r[6] ? String(r[6]).trim() : undefined
+    };
   }).filter(Boolean) as AdminUser[];
 }
 
 function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
-  if (!rows || rows.length <= 1) return [];
-  return rows.slice(1).map(r => ({
+  if (!rows || rows.length === 0) return [];
+  const firstRowFirstCell = String(rows[0]?.[0] || '').trim().toLowerCase();
+  const isHeaderFirst = firstRowFirstCell === 'timestamp' || firstRowFirstCell === 'time';
+  const dataRows = isHeaderFirst ? rows.slice(1) : rows;
+
+  return dataRows.map(r => ({
     timestamp: String(r[0] || '').trim(),
     action: String(r[1] || '').trim(),
     targetEmail: String(r[2] || '').trim(),
     performedBy: String(r[3] || '').trim(),
     result: String(r[4] || 'Success').trim()
-  })).filter(l => l.timestamp);
+  })).filter(l => l.timestamp && l.timestamp.toLowerCase() !== 'timestamp');
 }
 
 export function mapShipmentToRow(s: Shipment): any[] {
