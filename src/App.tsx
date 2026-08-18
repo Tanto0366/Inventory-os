@@ -35,8 +35,11 @@ import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, 
 import { initAuth, googleSignIn, logout, getAccessToken } from './lib/firebase';
 import { 
   findSpreadsheet, 
+  resolveMasterSpreadsheetId,
+  getCanonicalSpreadsheetId,
   createAndProvisionSpreadsheet, 
   loadSpreadsheetData, 
+  loadSpreadsheetDataReadOnly,
   saveAssetsSheet, 
   saveShipmentsSheet,
   saveGatePassesSheet,
@@ -52,7 +55,7 @@ import {
   getSampleSheetData
 } from './lib/googleSheets';
 import { expandAssetsWithQuantities } from './lib/assetUtils';
-import { evaluateUserAuth, getUserRole, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail } from './lib/auth';
+import { evaluateUserAuth, getUserRole, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail, isPrimarySuperAdmin } from './lib/auth';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -339,10 +342,10 @@ export default function App() {
         setAdminLogs(prev => [log, ...prev]);
 
         try {
-          let id = spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
-          if (!id) {
-            id = await findSpreadsheet(activeToken);
-          }
+          const id = await resolveMasterSpreadsheetId(
+            activeToken,
+            spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || undefined
+          );
           if (id) {
             setSpreadsheetId(id);
             setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
@@ -350,8 +353,8 @@ export default function App() {
               localStorage.setItem('inventory_os_spreadsheet_id', id);
             } catch {}
 
-            // Always hydrate data from Google Sheets as the single source of truth
-            const data = await loadSpreadsheetData(id, activeToken);
+            // Always hydrate data from Google Sheets as the single source of truth (read-only safe)
+            const data = await loadSpreadsheetDataReadOnly(id, activeToken);
             if (data.assets && data.assets.length > 0) {
               setAssets(expandAssetsWithQuantities(data.assets));
             }
@@ -370,6 +373,7 @@ export default function App() {
           }
         } catch (err: any) {
           console.warn('Initial spreadsheet load warning:', err);
+          setSyncError(err.message || 'Unable to connect to master database');
         }
       },
       () => {
@@ -389,13 +393,19 @@ export default function App() {
     setIsSyncing(true);
     setSyncError(null);
     try {
-      let sheetId = targetSheetId || spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id');
+      let sheetId = await resolveMasterSpreadsheetId(
+        currentToken,
+        targetSheetId || spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || undefined
+      );
+
+      // Non-super admins must NEVER create a new spreadsheet
       if (!sheetId) {
-        sheetId = await findSpreadsheet(currentToken);
-      }
-      if (!sheetId) {
-        const created = await createAndProvisionSpreadsheet(currentToken);
-        sheetId = created.spreadsheetId;
+        if (isPrimarySuperAdmin(user?.email)) {
+          const created = await createAndProvisionSpreadsheet(currentToken);
+          sheetId = created.spreadsheetId;
+        } else {
+          throw new Error('InventoryOS Master Database Unavailable. Please connect the master Google Spreadsheet ID or contact the Primary Super Admin.');
+        }
       }
 
       setSpreadsheetId(sheetId);
@@ -404,7 +414,7 @@ export default function App() {
         localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
       } catch {}
 
-      const data = await loadSpreadsheetData(sheetId, currentToken);
+      const data = await loadSpreadsheetDataReadOnly(sheetId, currentToken);
 
       if (data.assets && data.assets.length > 0) {
         setAssets(expandAssetsWithQuantities(data.assets));
@@ -425,6 +435,7 @@ export default function App() {
     } catch (e: any) {
       console.warn('Pull from Google Sheets failed:', e.message || e);
       setSyncError(e.message || 'Failed to pull from Google Sheets');
+      throw e;
     } finally {
       setIsSyncing(false);
     }
@@ -1395,6 +1406,7 @@ export default function App() {
         isChecking={isSyncing}
         currentSpreadsheetId={spreadsheetId}
         adminsCount={adminsList.length}
+        errorMessage={syncError}
       />
     );
   }

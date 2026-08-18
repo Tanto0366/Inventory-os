@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, RefreshCw, LogOut, Mail, Lock, CheckCircle2, Link2, Database, ChevronDown, ChevronUp } from 'lucide-react';
+import { ShieldAlert, RefreshCw, LogOut, Mail, Lock, CheckCircle2, Link2, Database, ChevronDown, ChevronUp, AlertOctagon } from 'lucide-react';
 import { PRIMARY_SUPER_ADMIN_EMAIL } from '../lib/auth';
 
 interface AccessDeniedViewProps {
@@ -10,6 +10,7 @@ interface AccessDeniedViewProps {
   isChecking?: boolean;
   currentSpreadsheetId?: string | null;
   adminsCount?: number;
+  errorMessage?: string | null;
 }
 
 export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
@@ -19,7 +20,8 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
   onRefreshAuth,
   isChecking = false,
   currentSpreadsheetId,
-  adminsCount = 0
+  adminsCount = 0,
+  errorMessage
 }) => {
   const [copied, setCopied] = useState(false);
   const [showConnectSheet, setShowConnectSheet] = useState(false);
@@ -43,7 +45,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
       targetId = match[1];
     }
 
-    setConnectMsg('Connecting and verifying spreadsheet...');
+    setConnectMsg('Connecting and verifying master database...');
     try {
       await onRefreshAuth(targetId);
       setConnectMsg(null);
@@ -72,6 +74,22 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
           </div>
         </div>
 
+        {/* Database Reachability Alert if master sheet couldn't be loaded */}
+        {errorMessage && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-2xl text-left flex items-start gap-2.5 text-xs text-amber-900">
+            <AlertOctagon className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-amber-950">AUTHORIZATION CHECK FAILED</div>
+              <div className="text-[11px] text-amber-800 mt-0.5">
+                InventoryOS could not verify your permissions because the master database could not be reached.
+              </div>
+              <div className="text-[10px] font-mono text-amber-700 mt-1 break-all">
+                {errorMessage}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Status Badge & Icon */}
         <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 mx-auto mb-4">
           <ShieldAlert className="w-8 h-8" />
@@ -98,6 +116,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
             <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Signed-In Google Account</div>
             <div className="font-mono font-bold text-[#2D3436] break-all">{userEmail}</div>
           </div>
+
           <div className="pt-2 border-t border-[#E9ECEF] flex items-center justify-between">
             <div>
               <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Assigned Role</div>
@@ -105,12 +124,23 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
                 {isRevoked ? 'Revoked' : 'Unauthorized / No Access'}
               </div>
             </div>
-            {adminsCount > 0 && (
-              <div className="text-right">
-                <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Known Admins</div>
-                <div className="font-mono font-bold text-[#2D3436]">{adminsCount} loaded</div>
+            <div className="text-right">
+              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Known Admins</div>
+              <div className="font-mono font-bold text-[#2D3436]">{adminsCount} loaded</div>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-[#E9ECEF] flex items-center justify-between text-[11px]">
+            <div>
+              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Connected Database</div>
+              <div className="font-mono text-[#636E72]">
+                {currentSpreadsheetId ? `InventoryOS_Database (${currentSpreadsheetId.slice(0, 8)}...)` : 'Not Connected'}
               </div>
-            )}
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Auth Source</div>
+              <div className="font-mono text-[#636E72]">Master Admin Worksheet</div>
+            </div>
           </div>
         </div>
 
@@ -123,7 +153,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <Database className="w-3.5 h-3.5 text-[#6C5CE7]" />
-              {currentSpreadsheetId ? 'Connected to Google Sheet' : 'Connect Master Spreadsheet ID'}
+              {currentSpreadsheetId ? 'Master Spreadsheet Connected' : 'Connect Master Spreadsheet ID'}
             </span>
             {showConnectSheet ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>

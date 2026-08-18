@@ -80,10 +80,13 @@ export interface LocationInfo {
   type: string;
 }
 
+export type AppRole = 'SUPER_ADMIN' | 'ADMIN';
+export type AdminStatus = 'Active' | 'Revoked' | 'Protected';
+
 export interface AdminUser {
   email: string;
-  role: 'Super Admin' | 'Admin';
-  status: 'Active' | 'Revoked' | 'Protected';
+  role: AppRole | 'Super Admin' | 'Admin' | 'SUPER_ADMIN' | 'ADMIN';
+  status: AdminStatus;
   grantedBy: string;
   grantedOn: string;
   lastLogin?: string;

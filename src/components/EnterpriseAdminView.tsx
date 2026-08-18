@@ -93,8 +93,8 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
   });
 
   const activeCount = adminsList.filter(a => a.status !== 'Revoked').length;
-  const superAdminCount = adminsList.filter(a => a.role === 'Super Admin' && a.status !== 'Revoked').length;
-  const adminReadOnlyCount = adminsList.filter(a => a.role === 'Admin' && a.status !== 'Revoked').length;
+  const superAdminCount = adminsList.filter(a => (a.role || '').toUpperCase().includes('SUPER') && a.status !== 'Revoked').length;
+  const adminReadOnlyCount = adminsList.filter(a => !(a.role || '').toUpperCase().includes('SUPER') && a.status !== 'Revoked').length;
   const revokedCount = adminsList.filter(a => a.status === 'Revoked').length;
 
   return (
@@ -337,24 +337,31 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
                               </span>
                             ) : isRevoked ? (
                               <span className="text-[10px] text-slate-400 font-mono line-through">
-                                {admin.role}
+                                {(admin.role || '').toUpperCase().includes('SUPER') ? 'Super Admin' : 'Admin'}
                               </span>
                             ) : (
                               <div className="flex items-center gap-1.5">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border ${
-                                  admin.role === 'Super Admin'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-100'
-                                    : 'bg-sky-50 text-sky-700 border-sky-100'
-                                }`}>
-                                  {admin.role === 'Super Admin' ? '🔐 Super Admin' : '👤 Read-Only Admin'}
-                                </span>
-                                <button
-                                  onClick={() => onChangeRole(admin.email, admin.role === 'Super Admin' ? 'Admin' : 'Super Admin')}
-                                  title={`Switch role to ${admin.role === 'Super Admin' ? 'Admin' : 'Super Admin'}`}
-                                  className="p-1 hover:bg-[#E9ECEF] text-[#636E72] rounded-md transition cursor-pointer"
-                                >
-                                  <ArrowRightLeft className="w-3 h-3" />
-                                </button>
+                                {(() => {
+                                  const isSuper = (admin.role || '').toUpperCase().includes('SUPER');
+                                  return (
+                                    <>
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+                                        isSuper
+                                          ? 'bg-purple-50 text-purple-700 border-purple-100'
+                                          : 'bg-sky-50 text-sky-700 border-sky-100'
+                                      }`}>
+                                        {isSuper ? '🔐 Super Admin' : '👤 Read-Only Admin'}
+                                      </span>
+                                      <button
+                                        onClick={() => onChangeRole(admin.email, isSuper ? 'Admin' : 'Super Admin')}
+                                        title={`Switch role to ${isSuper ? 'Admin (Read-Only)' : 'Super Admin (Full Write)'}`}
+                                        className="p-1 hover:bg-[#E9ECEF] text-[#636E72] rounded-md transition cursor-pointer"
+                                      >
+                                        <ArrowRightLeft className="w-3 h-3" />
+                                      </button>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             )}
                           </td>

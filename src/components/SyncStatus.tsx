@@ -169,7 +169,33 @@ export default function SyncStatus({
         </div>
       )}
 
-      {/* Collection Row Counters Grid */}
+      {/* Database Connection Metadata */}
+      {spreadsheetId && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-[#F8F9FA] border border-[#E9ECEF] text-xs">
+          <div>
+            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Connected Master Database</div>
+            <div className="font-mono font-bold text-[#2D3436] truncate mt-0.5" title={spreadsheetId}>
+              InventoryOS_Database ({spreadsheetId.slice(0, 10)}...)
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Authorization Source</div>
+            <div className="font-mono text-[#2D3436] mt-0.5">
+              Master Google Sheet <code className="bg-white px-1 py-0.5 rounded border border-[#DEE2E6] text-[10px]">Admin</code> Worksheet
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Session Mode</div>
+            <div className="mt-0.5 font-bold">
+              {isSuperAdmin ? (
+                <span className="text-purple-700">🔐 Super Admin (Full Write)</span>
+              ) : (
+                <span className="text-sky-700">👤 Admin (Strict Read-Only)</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {counts && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
           <div className="p-3 bg-white border border-[#E9ECEF] rounded-2xl text-center">

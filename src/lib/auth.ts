@@ -1,4 +1,4 @@
-import { AdminUser } from '../types';
+import { AdminUser, AppRole } from '../types';
 
 export const PRIMARY_SUPER_ADMIN_EMAIL = 'aditya@aftermathventures.in';
 
@@ -10,7 +10,8 @@ export interface AuthStatus {
   isAdminReadOnly: boolean;
   isProtectedSuperAdmin: boolean;
   isRevoked: boolean;
-  role: 'Super Admin' | 'Admin' | 'Unauthorized';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'Unauthorized';
+  roleDisplay: 'SUPER ADMIN' | 'ADMIN • READ ONLY' | 'Unauthorized';
   userRole: UserRole;
   matchedAdminRecord?: AdminUser;
 }
@@ -23,8 +24,33 @@ export function normalizeEmail(email?: string | null): string {
 }
 
 /**
+ * Checks if the email is the permanent protected Primary Super Admin.
+ */
+export function isPrimarySuperAdmin(email?: string | null): boolean {
+  return normalizeEmail(email) === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL);
+}
+
+/**
+ * Normalizes raw role string into canonical AppRole ('SUPER_ADMIN' | 'ADMIN').
+ */
+export function normalizeAppRole(rawRole?: string | null): AppRole {
+  const r = (rawRole || '').trim().toUpperCase().replace(/[\s\-_]+/g, '_');
+  if (r.includes('SUPER')) {
+    return 'SUPER_ADMIN';
+  }
+  return 'ADMIN';
+}
+
+/**
  * Single source of truth for resolving user authorization roles.
  * Resolves: SUPER_ADMIN | ADMIN | REVOKED | UNAUTHORIZED
+ * 
+ * Expected behavior:
+ * - Primary Super Admin -> SUPER_ADMIN
+ * - Active Admin record (role SUPER_ADMIN) -> SUPER_ADMIN
+ * - Active Admin record (role ADMIN) -> ADMIN
+ * - Revoked Admin record -> REVOKED
+ * - No matching record -> UNAUTHORIZED
  */
 export function getUserRole(
   email: string | undefined | null,
@@ -35,8 +61,8 @@ export function getUserRole(
     return 'UNAUTHORIZED';
   }
 
-  // 1. Check Primary Protected Super Admin
-  if (normalized === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL)) {
+  // 1. Check Primary Protected Super Admin (Permanent Root)
+  if (isPrimarySuperAdmin(normalized)) {
     return 'SUPER_ADMIN';
   }
 
@@ -55,25 +81,12 @@ export function getUserRole(
     return 'REVOKED';
   }
 
-  // 4. Resolve role
-  const roleStr = (record.role || '').trim().toLowerCase();
-  if (roleStr === 'super admin' || roleStr.includes('super')) {
+  // 4. Resolve normalized role
+  const rawRole = (record.role || '').trim().toLowerCase();
+  if (rawRole.includes('super')) {
     return 'SUPER_ADMIN';
   }
 
-  if (
-    roleStr === 'admin' ||
-    roleStr === 'read-only admin' ||
-    roleStr === 'read only' ||
-    roleStr === 'readonly' ||
-    roleStr === 'staff' ||
-    roleStr === 'user' ||
-    roleStr.includes('admin')
-  ) {
-    return 'ADMIN';
-  }
-
-  // Any verified, non-revoked record in the Admin ledger is granted Admin access
   return 'ADMIN';
 }
 
@@ -91,6 +104,7 @@ export function evaluateUserAuth(
   const isAdmin = userRole === 'ADMIN';
   const isRevoked = userRole === 'REVOKED';
   const isAuthorized = isSuper || isAdmin;
+  const isProtected = isPrimarySuperAdmin(normEmail);
 
   const matched = adminsList.find(a => normalizeEmail(a.email) === normEmail);
 
@@ -98,13 +112,14 @@ export function evaluateUserAuth(
     isAuthorized,
     isSuperAdmin: isSuper,
     isAdminReadOnly: isAdmin,
-    isProtectedSuperAdmin: normEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL),
+    isProtectedSuperAdmin: isProtected,
     isRevoked,
-    role: isSuper ? 'Super Admin' : (isAdmin ? 'Admin' : 'Unauthorized'),
+    role: isSuper ? 'SUPER_ADMIN' : (isAdmin ? 'ADMIN' : 'Unauthorized'),
+    roleDisplay: isSuper ? 'SUPER ADMIN' : (isAdmin ? 'ADMIN • READ ONLY' : 'Unauthorized'),
     userRole,
-    matchedAdminRecord: matched || (normEmail === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL) ? {
+    matchedAdminRecord: matched || (isProtected ? {
       email: PRIMARY_SUPER_ADMIN_EMAIL,
-      role: 'Super Admin',
+      role: 'SUPER_ADMIN',
       status: 'Protected',
       grantedBy: 'System',
       grantedOn: '2026-08-14',
@@ -124,9 +139,11 @@ export function assertSuperAdmin(
 ): void {
   const auth = evaluateUserAuth(userEmail, adminsList);
   if (!auth.isSuperAdmin) {
-    const errorMsg = `Permission Denied: Super Admin authority is required to ${actionName}. Admin accounts have read-only access.`;
-    console.error(`[InventoryOS Security] ${errorMsg} (User: ${userEmail || 'Unknown'})`);
+    const errorMsg = `Permission Denied: Insufficient permissions. Admin accounts are read-only. Super Admin authorization is required to ${actionName}.`;
+    console.error(`[InventoryOS Security 403] ${errorMsg} (User: ${userEmail || 'Unknown'})`);
     throw new Error(errorMsg);
   }
 }
+
+export const requireSuperAdmin = assertSuperAdmin;
 

@@ -274,7 +274,13 @@ const SAMPLE_LOCATIONS: LocationInfo[] = [
   { city: 'Kochi', address: 'Event Warehouse, Kakkanad', type: 'Site' }
 ];
 
-// 1. Search for existing spreadsheet in user's Drive (including shared files)
+// 1. Get canonical master spreadsheet ID from environment
+export function getCanonicalSpreadsheetId(): string | null {
+  const envId = ((import.meta as any).env?.VITE_INVENTORYOS_SPREADSHEET_ID || '').trim();
+  return envId || null;
+}
+
+// Search for existing spreadsheet in user's Drive (including shared files)
 export async function findSpreadsheet(token: string): Promise<string | null> {
   const query = `name = '${DATABASE_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
   
@@ -308,6 +314,30 @@ export async function findSpreadsheet(token: string): Promise<string | null> {
     }
   } catch (e) {
     console.warn('Standard Drive search notice:', e);
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the master spreadsheet ID with canonical precedence:
+ * 1. Configured VITE_INVENTORYOS_SPREADSHEET_ID env var
+ * 2. Explicitly passed target spreadsheet ID (e.g. manually connected)
+ * 3. Drive discovery for InventoryOS_Database (including shared drives)
+ */
+export async function resolveMasterSpreadsheetId(token: string, explicitId?: string): Promise<string | null> {
+  const canonical = getCanonicalSpreadsheetId();
+  if (canonical) {
+    return canonical;
+  }
+
+  if (explicitId && explicitId.trim()) {
+    return explicitId.trim();
+  }
+
+  const found = await findSpreadsheet(token);
+  if (found) {
+    return found;
   }
 
   return null;
@@ -604,11 +634,15 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
   };
 }
 
-// 3. Load entire database from spreadsheet in batch with prior schema check
+// 3. Load entire database from spreadsheet in batch with prior schema check (Super Admin mode)
 export async function loadSpreadsheetData(spreadsheetId: string, token: string): Promise<SheetData> {
   // Ensure schema exists before querying batch ranges to avoid "Unable to parse range"
   await ensureSpreadsheetSchema(spreadsheetId, token);
+  return loadSpreadsheetDataReadOnly(spreadsheetId, token);
+}
 
+// 3b. Read-Only Database Loader for Admin Users (NEVER creates worksheets, NEVER writes headers, NEVER alters structure)
+export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, token: string): Promise<SheetData> {
   const ranges = [
     'Assets Database!A1:R2000',
     'Gate Pass!A1:M1000',
@@ -660,10 +694,10 @@ export async function loadSpreadsheetData(spreadsheetId: string, token: string):
     admins: admins.length > 0 ? admins : [
       {
         email: 'aditya@aftermathventures.in',
-        role: 'Super Admin',
+        role: 'SUPER_ADMIN',
         status: 'Protected',
         grantedBy: 'System',
-        grantedOn: new Date().toISOString().split('T')[0],
+        grantedOn: '2026-08-14',
         lastLogin: new Date().toISOString().split('T')[0],
         lastUpdated: new Date().toISOString().split('T')[0]
       }
@@ -1151,13 +1185,19 @@ function parseRowsToAdmins(rows: any[][]): AdminUser[] {
   const header = (isHeaderFirst ? rows[0] : []).map(h => String(h || '').trim().toLowerCase());
   const hasStatus = header.includes('status');
 
-  return dataRows.map(r => {
-    const email = String(r[0] || '').trim();
-    if (!email || email.toLowerCase() === 'email') return null;
+  const seen = new Set<string>();
+  const parsedList: AdminUser[] = [];
 
-    const isPrimary = email.toLowerCase() === 'aditya@aftermathventures.in';
+  for (const r of dataRows) {
+    const rawEmail = String(r[0] || '').trim();
+    const cleanEmail = rawEmail.toLowerCase();
+    if (!cleanEmail || cleanEmail === 'email' || !cleanEmail.includes('@')) continue;
+    if (seen.has(cleanEmail)) continue;
+    seen.add(cleanEmail);
+
+    const isPrimary = cleanEmail === 'aditya@aftermathventures.in';
     const rawRole = String(r[1] || '').trim().toLowerCase();
-    const role: 'Super Admin' | 'Admin' = (isPrimary || rawRole.includes('super')) ? 'Super Admin' : 'Admin';
+    const role: 'SUPER_ADMIN' | 'ADMIN' = (isPrimary || rawRole.includes('super')) ? 'SUPER_ADMIN' : 'ADMIN';
     
     // Check if status exists in 3rd column or based on header
     let status: 'Active' | 'Revoked' | 'Protected' = isPrimary ? 'Protected' : 'Active';
@@ -1172,16 +1212,31 @@ function parseRowsToAdmins(rows: any[][]): AdminUser[] {
       }
     }
 
-    return {
-      email,
+    parsedList.push({
+      email: rawEmail,
       role,
       status,
       grantedBy: String(r[3] || (isPrimary ? 'System' : 'Super Admin')).trim(),
-      grantedOn: String(r[4] || new Date().toISOString().split('T')[0]).trim(),
+      grantedOn: String(r[4] || '2026-08-14').trim(),
       lastLogin: r[5] ? String(r[5]).trim() : undefined,
       lastUpdated: r[6] ? String(r[6]).trim() : undefined
-    };
-  }).filter(Boolean) as AdminUser[];
+    });
+  }
+
+  // Ensure Primary Super Admin is always present
+  if (!seen.has('aditya@aftermathventures.in')) {
+    parsedList.unshift({
+      email: 'aditya@aftermathventures.in',
+      role: 'SUPER_ADMIN',
+      status: 'Protected',
+      grantedBy: 'System',
+      grantedOn: '2026-08-14',
+      lastLogin: new Date().toISOString().split('T')[0],
+      lastUpdated: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  return parsedList;
 }
 
 function parseRowsToAdminLogs(rows: any[][]): AdminLog[] {
@@ -1302,22 +1357,56 @@ export async function saveShipmentsSheet(spreadsheetId: string, token: string, s
   await writeValues(spreadsheetId, token, `Shipment Tracker!A1:AG${shipments.length + 1}`, [HEADERS['Shipment Tracker'], ...values]);
 }
 
-// Save entire Admins list (7-column schema)
+// Save entire Admins list (7-column schema) with deduplication & primary protection
 export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
   await ensureSpreadsheetSchema(spreadsheetId, token);
   const headers = ['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated'];
-  const values = admins.map(a => [
+  
+  // Deduplicate on normalized email
+  const seen = new Set<string>();
+  const normalizedAdmins: AdminUser[] = [];
+
+  // Ensure Primary Super Admin is always first
+  normalizedAdmins.push({
+    email: 'aditya@aftermathventures.in',
+    role: 'SUPER_ADMIN',
+    status: 'Protected',
+    grantedBy: 'System',
+    grantedOn: '2026-08-14',
+    lastLogin: new Date().toISOString().split('T')[0],
+    lastUpdated: new Date().toISOString().split('T')[0]
+  });
+  seen.add('aditya@aftermathventures.in');
+
+  for (const a of admins) {
+    const cleanEmail = (a.email || '').trim().toLowerCase();
+    if (!cleanEmail || seen.has(cleanEmail)) continue;
+    seen.add(cleanEmail);
+
+    const isSuper = (a.role || '').toUpperCase().includes('SUPER');
+    normalizedAdmins.push({
+      email: a.email.trim(),
+      role: isSuper ? 'SUPER_ADMIN' : 'ADMIN',
+      status: a.status === 'Revoked' ? 'Revoked' : 'Active',
+      grantedBy: a.grantedBy || 'Super Admin',
+      grantedOn: a.grantedOn || new Date().toISOString().split('T')[0],
+      lastLogin: a.lastLogin || '',
+      lastUpdated: a.lastUpdated || new Date().toISOString().split('T')[0]
+    });
+  }
+
+  const values = normalizedAdmins.map(a => [
     a.email,
-    a.role || 'Admin',
-    a.status || 'Active',
-    a.grantedBy || 'System',
-    a.grantedOn || new Date().toISOString().split('T')[0],
+    a.role,
+    a.status,
+    a.grantedBy,
+    a.grantedOn,
     a.lastLogin || '',
-    a.lastUpdated || new Date().toISOString().split('T')[0]
+    a.lastUpdated || ''
   ]);
   
   await clearRange(spreadsheetId, token, 'Admin!A2:G500');
-  await writeValues(spreadsheetId, token, `Admin!A1:G${admins.length + 1}`, [headers, ...values]);
+  await writeValues(spreadsheetId, token, `Admin!A1:G${values.length + 1}`, [headers, ...values]);
 }
 
 // Append an admin activity log
