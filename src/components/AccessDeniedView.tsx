@@ -5,6 +5,7 @@ import { PRIMARY_SUPER_ADMIN_EMAIL } from '../lib/auth';
 interface AccessDeniedViewProps {
   userEmail: string;
   isRevoked?: boolean;
+  isDataError?: boolean;
   onLogout: () => void;
   onRefreshAuth: (customSheetId?: string) => Promise<any> | void;
   isChecking?: boolean;
@@ -16,6 +17,7 @@ interface AccessDeniedViewProps {
 export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
   userEmail,
   isRevoked,
+  isDataError,
   onLogout,
   onRefreshAuth,
   isChecking = false,
@@ -45,7 +47,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
       targetId = match[1];
     }
 
-    setConnectMsg('Connecting and verifying master database...');
+    setConnectMsg('Connecting and reading Admin!A:G ledger...');
     try {
       await onRefreshAuth(targetId);
       setConnectMsg(null);
@@ -74,41 +76,52 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
           </div>
         </div>
 
+        {/* Status Badge & Icon */}
+        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${
+          isDataError 
+            ? 'bg-amber-50 border border-amber-100 text-amber-600' 
+            : 'bg-rose-50 border border-rose-100 text-rose-600'
+        }`}>
+          {isDataError ? <AlertOctagon className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
+        </div>
+
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1 border rounded-full text-xs font-bold mb-3 ${
+          isDataError
+            ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : 'bg-rose-50 border-rose-200 text-rose-700'
+        }`}>
+          <Lock className="w-3.5 h-3.5" />
+          {isDataError 
+            ? 'Authorization Data Error' 
+            : (isRevoked ? 'Access Revoked' : 'Access Restricted')}
+        </div>
+
+        <h1 className="text-xl font-bold font-display text-[#2D3436] mb-2">
+          {isDataError 
+            ? 'Authorization Data Error' 
+            : (isRevoked ? 'Account Access Revoked' : 'Authorization Required')}
+        </h1>
+
+        <p className="text-xs text-[#636E72] leading-relaxed mb-6">
+          {isDataError
+            ? 'InventoryOS could not retrieve the authorization records from the master Google Sheet (Admin!A:G). Please verify network access or connect the correct spreadsheet ID.'
+            : isRevoked
+            ? 'Your administrator privileges for this Google account have been revoked by a Super Admin in the master database.'
+            : 'Your Google account is not listed in the authorized administrators ledger (Admin!A:G). InventoryOS is restricted to verified Admin and Super Admin users.'}
+        </p>
+
         {/* Database Reachability Alert if master sheet couldn't be loaded */}
         {errorMessage && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-2xl text-left flex items-start gap-2.5 text-xs text-amber-900">
             <AlertOctagon className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <div className="font-bold text-amber-950">AUTHORIZATION CHECK FAILED</div>
-              <div className="text-[11px] text-amber-800 mt-0.5">
-                InventoryOS could not verify your permissions because the master database could not be reached.
-              </div>
-              <div className="text-[10px] font-mono text-amber-700 mt-1 break-all">
+            <div className="overflow-hidden">
+              <div className="font-bold text-amber-950">GOOGLE API / SPREADSHEET DIAGNOSTIC</div>
+              <div className="text-[10px] font-mono text-amber-800 mt-1 break-all bg-amber-100/60 p-1.5 rounded-lg border border-amber-200">
                 {errorMessage}
               </div>
             </div>
           </div>
         )}
-
-        {/* Status Badge & Icon */}
-        <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 mx-auto mb-4">
-          <ShieldAlert className="w-8 h-8" />
-        </div>
-
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-full text-xs font-bold mb-3">
-          <Lock className="w-3.5 h-3.5" />
-          {isRevoked ? 'Access Revoked' : 'Access Restricted'}
-        </div>
-
-        <h1 className="text-xl font-bold font-display text-[#2D3436] mb-2">
-          {isRevoked ? 'Account Access Revoked' : 'Authorization Required'}
-        </h1>
-
-        <p className="text-xs text-[#636E72] leading-relaxed mb-6">
-          {isRevoked
-            ? 'Your administrator privileges for this Google account have been revoked by a Super Admin.'
-            : 'Your Google account is not listed in the authorized administrators ledger. InventoryOS data is restricted to verified Admin and Super Admin users.'}
-        </p>
 
         {/* Account Info Box */}
         <div className="bg-[#F8F9FA] border border-[#E9ECEF] rounded-2xl p-4 text-left text-xs mb-4 space-y-2">
@@ -120,26 +133,28 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
           <div className="pt-2 border-t border-[#E9ECEF] flex items-center justify-between">
             <div>
               <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Assigned Role</div>
-              <div className="font-semibold text-rose-600">
-                {isRevoked ? 'Revoked' : 'Unauthorized / No Access'}
+              <div className={`font-semibold ${isDataError ? 'text-amber-700' : 'text-rose-600'}`}>
+                {isDataError ? 'Pending Verification' : isRevoked ? 'Revoked' : 'Unauthorized / No Access'}
               </div>
             </div>
             <div className="text-right">
               <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Known Admins</div>
-              <div className="font-mono font-bold text-[#2D3436]">{adminsCount} loaded</div>
+              <div className="font-mono font-bold text-[#2D3436]">
+                {isDataError ? '0 (Unreachable)' : `${adminsCount} verified`}
+              </div>
             </div>
           </div>
 
           <div className="pt-2 border-t border-[#E9ECEF] flex items-center justify-between text-[11px]">
             <div>
               <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Connected Database</div>
-              <div className="font-mono text-[#636E72]">
-                {currentSpreadsheetId ? `InventoryOS_Database (${currentSpreadsheetId.slice(0, 8)}...)` : 'Not Connected'}
+              <div className="font-mono text-[#636E72] truncate max-w-[170px]" title={currentSpreadsheetId || 'None'}>
+                {currentSpreadsheetId ? `InventoryOS_Database (${currentSpreadsheetId.slice(0, 6)}...)` : 'Not Resolved'}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Auth Source</div>
-              <div className="font-mono text-[#636E72]">Master Admin Worksheet</div>
+              <div className="text-[10px] font-bold text-[#ADB5BD] uppercase tracking-wider">Auth Step</div>
+              <div className="font-mono text-[#636E72]">Read Admin!A:G</div>
             </div>
           </div>
         </div>
@@ -192,7 +207,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
             <Mail className="w-4 h-4" /> Need Access?
           </div>
           <p className="text-[11px] leading-relaxed text-purple-900">
-            Contact the Primary Super Admin to request role assignment:
+            Contact the Primary Super Admin to request role assignment or verify Google Sheet sharing permissions:
           </p>
           <div className="flex items-center justify-between gap-2 bg-white/80 border border-purple-200 rounded-xl px-3 py-1.5 font-mono text-[11px]">
             <span className="truncate select-all text-purple-950 font-bold">{PRIMARY_SUPER_ADMIN_EMAIL}</span>
@@ -214,7 +229,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-60 active:scale-98"
           >
             <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
-            {isChecking ? 'Re-checking permissions...' : 'Check Authorization Again'}
+            {isChecking ? 'Verifying Admin!A:G...' : 'Check Authorization Again'}
           </button>
 
           <button
@@ -227,7 +242,7 @@ export const AccessDeniedView: React.FC<AccessDeniedViewProps> = ({
         </div>
 
         <p className="text-[10px] text-[#ADB5BD] mt-6">
-          Security policy: All authentication and authorization attempts are timestamped and logged.
+          Security policy: Authorization is evaluated strictly against the master Google Sheets Admin ledger.
         </p>
 
       </div>

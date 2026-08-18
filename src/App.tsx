@@ -40,6 +40,7 @@ import {
   createAndProvisionSpreadsheet, 
   loadSpreadsheetData, 
   loadSpreadsheetDataReadOnly,
+  readAdminRecordsOnly,
   saveAssetsSheet, 
   saveShipmentsSheet,
   saveGatePassesSheet,
@@ -75,6 +76,11 @@ export default function App() {
   const [needsAuth, setNeedsAuth] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Permission Pipeline States
+  const [authStage, setAuthStage] = useState<'IDLE' | 'CHECKING_PERMISSIONS' | 'DATA_ERROR' | 'ACCESS_DENIED' | 'AUTHORIZED'>('IDLE');
+  const [authDataError, setAuthDataError] = useState<string | null>(null);
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
 
   // Google Sheets state
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(null);
@@ -325,8 +331,8 @@ export default function App() {
   // Initialize Auth listeners on load
   useEffect(() => {
     initAuth(
-      async (user, activeToken) => {
-        setUser(user);
+      async (authedUser, activeToken) => {
+        setUser(authedUser);
         setToken(activeToken);
         setNeedsAuth(false);
         try {
@@ -336,45 +342,13 @@ export default function App() {
         const log = {
           timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
           action: 'Session Restored',
-          targetEmail: user.email || '',
-          performedBy: user.email || ''
+          targetEmail: authedUser.email || '',
+          performedBy: authedUser.email || ''
         };
         setAdminLogs(prev => [log, ...prev]);
 
-        try {
-          const id = await resolveMasterSpreadsheetId(
-            activeToken,
-            spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || undefined
-          );
-          if (id) {
-            setSpreadsheetId(id);
-            setSpreadsheetUrl(`https://docs.google.com/spreadsheets/d/${id}`);
-            try {
-              localStorage.setItem('inventory_os_spreadsheet_id', id);
-            } catch {}
-
-            // Always hydrate data from Google Sheets as the single source of truth (read-only safe)
-            const data = await loadSpreadsheetDataReadOnly(id, activeToken);
-            if (data.assets && data.assets.length > 0) {
-              setAssets(expandAssetsWithQuantities(data.assets));
-            }
-            if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
-            if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
-            if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
-            if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
-            if (data.owners && data.owners.length > 0) setOwners(data.owners);
-            if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
-            if (data.locations && data.locations.length > 0) setLocations(data.locations);
-            if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
-            if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
-
-            setLastSync(new Date());
-            setSyncError(null);
-          }
-        } catch (err: any) {
-          console.warn('Initial spreadsheet load warning:', err);
-          setSyncError(err.message || 'Unable to connect to master database');
-        }
+        // Execute permission pipeline on session restore
+        await executeAuthorizationPipeline(authedUser, activeToken);
       },
       () => {
         setNeedsAuth(true);
@@ -382,29 +356,52 @@ export default function App() {
     );
   }, []);
 
-  // Pull / Load from Google Sheets (Hydration)
-  const pullFromGoogleSheets = async (activeToken: string | null = token, targetSheetId?: string) => {
+  // Central Permission Architecture Pipeline:
+  // Google Login -> Fresh OAuth token -> Read ONLY Admin!A:G -> Check records -> Find email -> ADMIN/SUPER -> Post-Auth Data Load
+  const executeAuthorizationPipeline = async (
+    currentUser: any,
+    activeToken: string | null,
+    targetSheetId?: string
+  ) => {
     const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
-    if (!currentToken || currentToken === 'DEMO_TOKEN') {
-      setSyncError('DEMO_MODE');
-      return;
-    }
+    if (!currentUser || !currentToken) return;
 
+    setIsVerifyingAuth(true);
     setIsSyncing(true);
-    setSyncError(null);
+    setAuthDataError(null);
+    setAuthStage('CHECKING_PERMISSIONS');
+
     try {
+      if (currentToken === 'DEMO_TOKEN') {
+        const sample = getSampleSheetData();
+        setAdminsList(sample.admins);
+        setAssets(expandAssetsWithQuantities(sample.assets));
+        setGatePasses(sample.gatePasses);
+        setShipments(sample.shipments);
+        setAuditLogs(sample.auditLogs);
+        setCampaigns(sample.campaigns);
+        setOwners(sample.owners);
+        setPossessors(sample.possessors);
+        setLocations(sample.locations);
+        setAuthStage('AUTHORIZED');
+        setSyncError('DEMO_MODE');
+        return;
+      }
+
+      // Step 1: Resolve Master Spreadsheet ID
       let sheetId = await resolveMasterSpreadsheetId(
         currentToken,
         targetSheetId || spreadsheetId || localStorage.getItem('inventory_os_spreadsheet_id') || undefined
       );
 
-      // Non-super admins must NEVER create a new spreadsheet
       if (!sheetId) {
-        if (isPrimarySuperAdmin(user?.email)) {
+        if (isPrimarySuperAdmin(currentUser.email)) {
           const created = await createAndProvisionSpreadsheet(currentToken);
           sheetId = created.spreadsheetId;
         } else {
-          throw new Error('InventoryOS Master Database Unavailable. Please connect the master Google Spreadsheet ID or contact the Primary Super Admin.');
+          setAuthStage('DATA_ERROR');
+          setAuthDataError('InventoryOS master database is not configured. Please connect the master Google Spreadsheet ID or contact the Primary Super Admin.');
+          return;
         }
       }
 
@@ -414,31 +411,90 @@ export default function App() {
         localStorage.setItem('inventory_os_spreadsheet_id', sheetId);
       } catch {}
 
-      const data = await loadSpreadsheetDataReadOnly(sheetId, currentToken);
+      // Step 2: Read ONLY Admin!A:G
+      let adminResult = await readAdminRecordsOnly(sheetId, currentToken);
 
-      if (data.assets && data.assets.length > 0) {
-        setAssets(expandAssetsWithQuantities(data.assets));
+      // Self-heal initial setup if primary super admin and sheet is fresh/empty
+      if ((!adminResult.ok || !adminResult.admins.length) && isPrimarySuperAdmin(currentUser.email)) {
+        await ensureSpreadsheetSchema(sheetId, currentToken);
+        adminResult = await readAdminRecordsOnly(sheetId, currentToken);
       }
-      if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
-      if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
-      if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
-      if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
-      if (data.owners && data.owners.length > 0) setOwners(data.owners);
-      if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
-      if (data.locations && data.locations.length > 0) setLocations(data.locations);
-      if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
-      if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
 
-      setLastSync(new Date());
+      // Step 3: Did Google return Admin records?
+      if (!adminResult.ok || !adminResult.admins || adminResult.admins.length === 0) {
+        // -> NO: Authorization data error
+        setAuthStage('DATA_ERROR');
+        setAuthDataError(adminResult.error || 'Google returned no administrator records from Admin!A:G.');
+        return;
+      }
+
+      // -> YES: Found Admin records from Google Sheets
+      setAdminsList(adminResult.admins);
+      try {
+        localStorage.setItem('inventory_os_admins', JSON.stringify(adminResult.admins));
+      } catch {}
+
+      // Step 4: Find email in Admin records
+      const role = getUserRole(currentUser.email, adminResult.admins);
+
+      if (role === 'UNAUTHORIZED' || role === 'REVOKED') {
+        // -> NO: Access denied
+        setAuthStage('ACCESS_DENIED');
+        return;
+      }
+
+      // -> YES: ADMIN or SUPER_ADMIN -> Authorized!
+      setAuthStage('AUTHORIZED');
       setSyncError(null);
-      return data;
-    } catch (e: any) {
-      console.warn('Pull from Google Sheets failed:', e.message || e);
-      setSyncError(e.message || 'Failed to pull from Google Sheets');
-      throw e;
+
+      // Step 5: Post-Authorization Load
+      if (role === 'SUPER_ADMIN') {
+        // Super Admin: Full read/write database access
+        const data = await loadSpreadsheetData(sheetId, currentToken);
+        if (data.assets && data.assets.length > 0) setAssets(expandAssetsWithQuantities(data.assets));
+        if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
+        if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
+        if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
+        if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
+        if (data.owners && data.owners.length > 0) setOwners(data.owners);
+        if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
+        if (data.locations && data.locations.length > 0) setLocations(data.locations);
+        if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+        if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
+        setLastSync(new Date());
+      } else {
+        // Admin: Read-only load of Assets / Shipments / Gate Passes
+        const data = await loadSpreadsheetDataReadOnly(sheetId, currentToken);
+        if (data.assets && data.assets.length > 0) setAssets(expandAssetsWithQuantities(data.assets));
+        if (data.shipments && data.shipments.length > 0) setShipments(data.shipments);
+        if (data.gatePasses && data.gatePasses.length > 0) setGatePasses(data.gatePasses);
+        if (data.auditLogs && data.auditLogs.length > 0) setAuditLogs(data.auditLogs);
+        if (data.campaigns && data.campaigns.length > 0) setCampaigns(data.campaigns);
+        if (data.owners && data.owners.length > 0) setOwners(data.owners);
+        if (data.possessors && data.possessors.length > 0) setPossessors(data.possessors);
+        if (data.locations && data.locations.length > 0) setLocations(data.locations);
+        if (data.admins && data.admins.length > 0) setAdminsList(data.admins);
+        if (data.adminLogs && data.adminLogs.length > 0) setAdminLogs(data.adminLogs);
+        setLastSync(new Date());
+      }
+    } catch (err: any) {
+      console.error('Authorization pipeline error:', err);
+      setAuthStage('DATA_ERROR');
+      setAuthDataError(err.message || 'Authorization check failed due to a network or Google API error.');
     } finally {
+      setIsVerifyingAuth(false);
       setIsSyncing(false);
     }
+  };
+
+  // Pull / Refresh from Google Sheets (Hydration via pipeline)
+  const pullFromGoogleSheets = async (activeToken: string | null = token, targetSheetId?: string) => {
+    const currentToken = activeToken || token || localStorage.getItem('inventory_os_token');
+    if (!currentToken || currentToken === 'DEMO_TOKEN') {
+      setSyncError('DEMO_MODE');
+      return;
+    }
+    await executeAuthorizationPipeline(user, currentToken, targetSheetId);
   };
 
   // Push / Save to Google Sheets with Safety Guard against empty wipes
@@ -535,30 +591,8 @@ export default function App() {
           localStorage.setItem('inventory_os_token', result.accessToken);
         } catch {}
 
-        // Pull latest sheet data to evaluate live permissions directly from Google Sheet
-        const sheetData = await pullFromGoogleSheets(result.accessToken);
-        const liveAdmins = (sheetData?.admins && sheetData.admins.length > 0) ? sheetData.admins : adminsList;
-        
-        if (sheetData?.admins && sheetData.admins.length > 0) {
-          setAdminsList(sheetData.admins);
-          try {
-            localStorage.setItem('inventory_os_admins', JSON.stringify(sheetData.admins));
-          } catch {}
-        }
-
-        const currentAuth = evaluateUserAuth(result.user.email, liveAdmins);
-
-        const log: AdminLog = {
-          timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-          action: currentAuth.isAuthorized ? `User Login (${currentAuth.role})` : 'Unauthorized Login Attempt',
-          targetEmail: result.user.email || '',
-          performedBy: result.user.email || '',
-          result: currentAuth.isAuthorized ? 'Success' : (currentAuth.isRevoked ? 'Revoked' : 'Denied')
-        };
-        setAdminLogs(prev => [log, ...prev]);
-        await runSheetSync(async (sheetId, activeToken) => {
-          await appendAdminLog(sheetId, activeToken, log);
-        });
+        // Execute permission pipeline directly with the fresh token
+        await executeAuthorizationPipeline(result.user, result.accessToken);
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -580,6 +614,7 @@ export default function App() {
       } as any);
       setToken('DEMO_TOKEN');
       setNeedsAuth(false);
+      setAuthStage('AUTHORIZED');
       setSyncError('DEMO_MODE'); // Indicator that we are operating in Local Offline mode
       
       const log = {
@@ -603,6 +638,8 @@ export default function App() {
       setToken(null);
       setSpreadsheetId(null);
       setSpreadsheetUrl(null);
+      setAuthStage('IDLE');
+      setAuthDataError(null);
       try {
         localStorage.removeItem('inventory_os_token');
         localStorage.removeItem('inventory_os_spreadsheet_id');
@@ -1393,20 +1430,60 @@ export default function App() {
     );
   }
 
-  // If user is signed in but not authorized in RBAC registry
-  if (user && !isAuthorized) {
+  // Intermediate Loading screen while reading Admin!A:G
+  if (user && isVerifyingAuth && authStage === 'CHECKING_PERMISSIONS') {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white border border-[#E9ECEF] rounded-3xl p-8 shadow-sm text-center">
+          <div className="w-14 h-14 rounded-2xl bg-[#6C5CE7]/10 border border-[#6C5CE7]/20 flex items-center justify-center text-[#6C5CE7] mx-auto mb-4">
+            <RefreshCw className="w-7 h-7 animate-spin text-[#6C5CE7]" />
+          </div>
+          <h2 className="text-lg font-bold text-[#2D3436] mb-1 font-display">Verifying Authorization</h2>
+          <p className="text-xs text-[#636E72] mb-4">
+            Reading administrator permissions strictly from <span className="font-mono font-bold text-[#2D3436]">Admin!A:G</span>
+          </p>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-600">
+            <span>Account:</span>
+            <span className="font-bold text-[#2D3436]">{user.email}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Authorization Data Error (Google returned no records or API error on Admin!A:G)
+  if (user && authStage === 'DATA_ERROR') {
+    return (
+      <AccessDeniedView 
+        userEmail={user.email || 'Unknown'}
+        isDataError={true}
+        errorMessage={authDataError}
+        onLogout={handleLogout}
+        onRefreshAuth={async (customSheetId?: string) => {
+          await executeAuthorizationPipeline(user, token, customSheetId);
+        }}
+        isChecking={isVerifyingAuth}
+        currentSpreadsheetId={spreadsheetId}
+        adminsCount={adminsList.length}
+      />
+    );
+  }
+
+  // Access Denied (User email is not in Admin records or is revoked)
+  if (user && (authStage === 'ACCESS_DENIED' || !isAuthorized)) {
     return (
       <AccessDeniedView 
         userEmail={user.email || 'Unknown'}
         isRevoked={isRevoked}
+        isDataError={false}
+        errorMessage={null}
         onLogout={handleLogout}
         onRefreshAuth={async (customSheetId?: string) => {
-          await pullFromGoogleSheets(token, customSheetId);
+          await executeAuthorizationPipeline(user, token, customSheetId);
         }}
-        isChecking={isSyncing}
+        isChecking={isVerifyingAuth}
         currentSpreadsheetId={spreadsheetId}
         adminsCount={adminsList.length}
-        errorMessage={syncError}
       />
     );
   }

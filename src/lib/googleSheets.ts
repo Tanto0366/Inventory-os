@@ -634,6 +634,81 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
   };
 }
 
+export interface ReadAdminRecordsResult {
+  ok: boolean;
+  admins: AdminUser[];
+  error?: string;
+  statusCode?: number;
+}
+
+/**
+ * Step 1 of permission architecture: Read ONLY Admin!A:G from master Google Spreadsheet.
+ * Does NOT touch any other worksheet.
+ */
+export async function readAdminRecordsOnly(
+  spreadsheetId: string,
+  token: string
+): Promise<ReadAdminRecordsResult> {
+  const range = 'Admin!A1:G500';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+      let errorMsg = `Google Sheets API Error (${res.status})`;
+      try {
+        const errJson = await res.json();
+        if (errJson.error?.message) {
+          errorMsg = errJson.error.message;
+        }
+      } catch {
+        const text = await res.text();
+        if (text) errorMsg = text;
+      }
+      return {
+        ok: false,
+        admins: [],
+        error: errorMsg,
+        statusCode: res.status
+      };
+    }
+
+    const json = await res.json();
+    const rows = json.values;
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      return {
+        ok: false,
+        admins: [],
+        error: 'The Admin worksheet in the connected master spreadsheet returned no rows or records.'
+      };
+    }
+
+    const admins = parseRowsToAdmins(rows);
+    if (!admins || admins.length === 0) {
+      return {
+        ok: false,
+        admins: [],
+        error: 'No valid administrator records found in Admin!A:G.'
+      };
+    }
+
+    return {
+      ok: true,
+      admins
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      admins: [],
+      error: err.message || 'Network error occurred while connecting to Google Sheets Admin ledger.'
+    };
+  }
+}
+
 // 3. Load entire database from spreadsheet in batch with prior schema check (Super Admin mode)
 export async function loadSpreadsheetData(spreadsheetId: string, token: string): Promise<SheetData> {
   // Ensure schema exists before querying batch ranges to avoid "Unable to parse range"
@@ -1175,7 +1250,7 @@ function parseRowsToLocations(rows: any[][]): LocationInfo[] {
   })).filter(l => l.city);
 }
 
-function parseRowsToAdmins(rows: any[][]): AdminUser[] {
+export function parseRowsToAdmins(rows: any[][]): AdminUser[] {
   if (!rows || rows.length === 0) return [];
   
   // Detect if first row is header
