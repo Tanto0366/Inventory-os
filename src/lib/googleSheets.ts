@@ -491,8 +491,8 @@ export async function ensureSpreadsheetSchema(spreadsheetId: string, token: stri
     headerUpdates.push({ range: 'Campaigns!A1:H1', values: [HEADERS['Campaigns']] });
   }
   if (missingTabs.includes('Admin')) {
-    headerUpdates.push({ range: 'Admin!A1:D1', values: [['Email', 'Role', 'Granted By', 'Granted On']] });
-    headerUpdates.push({ range: 'Admin!F1:I1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By']] });
+    headerUpdates.push({ range: 'Admin!A1:G1', values: [['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated']] });
+    headerUpdates.push({ range: 'Admin!I1:M1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By', 'Result']] });
   }
   if (missingTabs.includes('Owners')) {
     headerUpdates.push({ range: 'Owners!A1:C1', values: [HEADERS['Owners']] });
@@ -1432,16 +1432,30 @@ export async function saveShipmentsSheet(spreadsheetId: string, token: string, s
   await writeValues(spreadsheetId, token, `Shipment Tracker!A1:AG${shipments.length + 1}`, [HEADERS['Shipment Tracker'], ...values]);
 }
 
-// Save entire Admins list (7-column schema) with deduplication & primary protection
-export async function saveAdminsSheet(spreadsheetId: string, token: string, admins: AdminUser[]): Promise<void> {
+// Format and organize the Admin worksheet with professional Google Sheets styling, freezing, column widths, and rogue data cleanup
+export async function formatAndOrganizeAdminSheet(
+  spreadsheetId: string, 
+  token: string, 
+  admins: AdminUser[],
+  adminLogs?: AdminLog[]
+): Promise<void> {
   await ensureSpreadsheetSchema(spreadsheetId, token);
-  const headers = ['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated'];
-  
-  // Deduplicate on normalized email
+
+  // 1. Fetch spreadsheet metadata to get the sheetId of the Admin tab
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+  const metaRes = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } });
+  if (!metaRes.ok) {
+    await handleGoogleApiError(metaRes, 'Failed to inspect Admin sheet properties');
+  }
+  const meta = await metaRes.json();
+  const adminSheetObj = (meta.sheets || []).find((s: any) => s.properties?.title === 'Admin');
+  const adminSheetId: number = adminSheetObj?.properties?.sheetId ?? 0;
+
+  // 2. Deduplicate and normalize admins list
   const seen = new Set<string>();
   const normalizedAdmins: AdminUser[] = [];
 
-  // Ensure Primary Super Admin is always first
+  // Primary Super Admin is always first & protected
   normalizedAdmins.push({
     email: 'aditya@aftermathventures.in',
     role: 'SUPER_ADMIN',
@@ -1470,43 +1484,302 @@ export async function saveAdminsSheet(spreadsheetId: string, token: string, admi
     });
   }
 
-  const values = normalizedAdmins.map(a => [
+  // 3. Prepare admin rows
+  const adminHeaders = ['Email', 'Role', 'Status', 'Granted By', 'Granted On', 'Last Login', 'Last Updated'];
+  const adminValues = normalizedAdmins.map(a => [
     a.email,
     a.role,
     a.status,
     a.grantedBy,
     a.grantedOn,
-    a.lastLogin || '',
-    a.lastUpdated || ''
+    a.lastLogin || '—',
+    a.lastUpdated || '—'
   ]);
-  
-  await clearRange(spreadsheetId, token, 'Admin!A2:G500');
-  await writeValues(spreadsheetId, token, `Admin!A1:G${values.length + 1}`, [headers, ...values]);
+
+  // 4. Prepare logs rows
+  let logsToWrite: AdminLog[] = adminLogs || [];
+  if (!adminLogs || adminLogs.length === 0) {
+    try {
+      const logsRes = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!I2:M200')}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (logsRes.ok) {
+        const logsData = await logsRes.json();
+        if (logsData.values && Array.isArray(logsData.values)) {
+          logsToWrite = parseRowsToAdminLogs(logsData.values);
+        }
+      }
+    } catch {}
+  }
+
+  const logHeaders = ['Timestamp', 'Action', 'Target Email', 'Performed By', 'Result'];
+  const logValues = logsToWrite.map(l => [
+    l.timestamp,
+    l.action,
+    l.targetEmail,
+    l.performedBy,
+    l.result || 'Success'
+  ]);
+
+  // 5. Clean out all dirty/orphaned cells across columns A to Z
+  await clearRange(spreadsheetId, token, 'Admin!A2:Z500');
+
+  // 6. Write cleanly organized tables
+  const updates: { range: string; values: any[][] }[] = [
+    { range: `Admin!A1:G${adminValues.length + 1}`, values: [adminHeaders, ...adminValues] },
+    { range: `Admin!I1:M${Math.max(logValues.length + 1, 2)}`, values: [logHeaders, ...(logValues.length > 0 ? logValues : [['—', 'No security events recorded yet', '—', '—', '—']])] }
+  ];
+  await writeBatchValues(spreadsheetId, token, updates);
+
+  // 7. Apply Google Sheets native styling via batchUpdate
+  const colWidths = [
+    { col: 0, width: 280 }, // A: Email
+    { col: 1, width: 140 }, // B: Role
+    { col: 2, width: 120 }, // C: Status
+    { col: 3, width: 240 }, // D: Granted By
+    { col: 4, width: 120 }, // E: Granted On
+    { col: 5, width: 130 }, // F: Last Login
+    { col: 6, width: 130 }, // G: Last Updated
+    { col: 7, width: 40 },  // H: Separator
+    { col: 8, width: 180 }, // I: Timestamp
+    { col: 9, width: 220 }, // J: Action
+    { col: 10, width: 240 },// K: Target Email
+    { col: 11, width: 240 },// L: Performed By
+    { col: 12, width: 110 } // M: Result
+  ];
+
+  const requests: any[] = [
+    // Freeze header row 1
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: adminSheetId,
+          gridProperties: {
+            frozenRowCount: 1
+          }
+        },
+        fields: 'gridProperties.frozenRowCount'
+      }
+    },
+    // Set Header row height
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: adminSheetId,
+          dimension: 'ROWS',
+          startIndex: 0,
+          endIndex: 1
+        },
+        properties: { pixelSize: 38 },
+        fields: 'pixelSize'
+      }
+    }
+  ];
+
+  // Set column widths
+  for (const { col, width } of colWidths) {
+    requests.push({
+      updateDimensionProperties: {
+        range: {
+          sheetId: adminSheetId,
+          dimension: 'COLUMNS',
+          startIndex: col,
+          endIndex: col + 1
+        },
+        properties: { pixelSize: width },
+        fields: 'pixelSize'
+      }
+    });
+  }
+
+  // Format Header A1:G1 (Dark Navy Slate)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 0,
+        endRowIndex: 1,
+        startColumnIndex: 0,
+        endColumnIndex: 7
+      },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.118, green: 0.161, blue: 0.231 },
+          textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+          verticalAlignment: 'MIDDLE',
+          horizontalAlignment: 'LEFT'
+        }
+      },
+      fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
+    }
+  });
+
+  // Format Header I1:M1 (Deep Slate)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 0,
+        endRowIndex: 1,
+        startColumnIndex: 8,
+        endColumnIndex: 13
+      },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.2, green: 0.255, blue: 0.333 },
+          textFormat: { bold: true, fontSize: 10, foregroundColor: { red: 1, green: 1, blue: 1 } },
+          verticalAlignment: 'MIDDLE',
+          horizontalAlignment: 'LEFT'
+        }
+      },
+      fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
+    }
+  });
+
+  // Format Separator Column H (light neutral divider)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 0,
+        endRowIndex: 500,
+        startColumnIndex: 7,
+        endColumnIndex: 8
+      },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.965, green: 0.973, blue: 0.98 }
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor'
+    }
+  });
+
+  // Format Admin Data Rows (A2:G50)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 1,
+        endRowIndex: Math.max(adminValues.length + 1, 20),
+        startColumnIndex: 0,
+        endColumnIndex: 7
+      },
+      cell: {
+        userEnteredFormat: {
+          verticalAlignment: 'MIDDLE',
+          wrapStrategy: 'CLIP',
+          textFormat: { fontSize: 10 }
+        }
+      },
+      fields: 'userEnteredFormat(verticalAlignment,wrapStrategy,textFormat)'
+    }
+  });
+
+  // Format Log Data Rows (I2:M50)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 1,
+        endRowIndex: Math.max(logValues.length + 1, 20),
+        startColumnIndex: 8,
+        endColumnIndex: 13
+      },
+      cell: {
+        userEnteredFormat: {
+          verticalAlignment: 'MIDDLE',
+          wrapStrategy: 'CLIP',
+          textFormat: { fontSize: 10 }
+        }
+      },
+      fields: 'userEnteredFormat(verticalAlignment,wrapStrategy,textFormat)'
+    }
+  });
+
+  // Center align specific columns in Admin table (Role, Status, Dates)
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 1,
+        endRowIndex: Math.max(adminValues.length + 1, 20),
+        startColumnIndex: 1,
+        endColumnIndex: 3
+      },
+      cell: {
+        userEnteredFormat: {
+          horizontalAlignment: 'CENTER'
+        }
+      },
+      fields: 'userEnteredFormat.horizontalAlignment'
+    }
+  });
+
+  requests.push({
+    repeatCell: {
+      range: {
+        sheetId: adminSheetId,
+        startRowIndex: 1,
+        endRowIndex: Math.max(adminValues.length + 1, 20),
+        startColumnIndex: 4,
+        endColumnIndex: 7
+      },
+      cell: {
+        userEnteredFormat: {
+          horizontalAlignment: 'CENTER'
+        }
+      },
+      fields: 'userEnteredFormat.horizontalAlignment'
+    }
+  });
+
+  // Execute batchUpdate
+  const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+  const batchRes = await fetch(batchUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ requests })
+  });
+
+  if (!batchRes.ok) {
+    console.warn('Google Sheets notice: styling batchUpdate warning:', batchRes.statusText);
+  }
 }
 
-// Append an admin activity log
+// Save entire Admins list with complete formatting and rogue cell cleanup
+export async function saveAdminsSheet(
+  spreadsheetId: string, 
+  token: string, 
+  admins: AdminUser[],
+  adminLogs?: AdminLog[]
+): Promise<void> {
+  await formatAndOrganizeAdminSheet(spreadsheetId, token, admins, adminLogs);
+}
+
+// Append an admin activity log strictly to Columns I:M without touching Column A
 export async function appendAdminLog(spreadsheetId: string, token: string, log: AdminLog): Promise<void> {
-  await ensureSpreadsheetSchema(spreadsheetId, token);
-  const row = [log.timestamp, log.action, log.targetEmail, log.performedBy, log.result || 'Success'];
-  const range = 'Admin!I2';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
-  
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        values: [row]
-      })
-    });
-    if (!res.ok) {
-      console.warn('Google Sheets notice: Unable to append to Admin log range:', res.statusText);
+    await ensureSpreadsheetSchema(spreadsheetId, token);
+    
+    // Read current logs in Column I to calculate the next empty row
+    const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!I1:I500')}`;
+    const checkRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${token}` } });
+    let nextRow = 2;
+    if (checkRes.ok) {
+      const data = await checkRes.json();
+      nextRow = (data.values?.length || 1) + 1;
     }
+
+    const row = [log.timestamp, log.action, log.targetEmail, log.performedBy, log.result || 'Success'];
+    const targetRange = `Admin!I${nextRow}:M${nextRow}`;
+    await writeValues(spreadsheetId, token, targetRange, [row]);
   } catch (err) {
-    console.warn('Google Sheets notice: Admin log network error:', err);
+    console.warn('Google Sheets notice: Admin log write warning:', err);
   }
 }
 

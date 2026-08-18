@@ -3,7 +3,8 @@ import { AdminUser, AdminLog } from '../types';
 import { 
   Shield, UserCheck, UserX, AlertTriangle, Key, Search, RefreshCw, 
   Trash2, RotateCcw, Clock, Lock, CheckCircle2, XCircle, ShieldAlert,
-  ArrowRightLeft, Eye, ShieldCheck, Mail, Database, FileSpreadsheet, Archive
+  ArrowRightLeft, Eye, ShieldCheck, Mail, Database, FileSpreadsheet, Archive,
+  Sparkles, Check, Table
 } from 'lucide-react';
 import { PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail } from '../lib/auth';
 
@@ -19,6 +20,7 @@ interface EnterpriseAdminViewProps {
   onDeleteRecord?: (email: string) => Promise<void>;
   onExportBackup?: () => void;
   onWipeDatabase?: () => Promise<void>;
+  onFormatAdminSheet?: () => Promise<void>;
 }
 
 export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
@@ -32,15 +34,33 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
   onDeleteAdminRecord,
   onDeleteRecord,
   onExportBackup,
-  onWipeDatabase
+  onWipeDatabase,
+  onFormatAdminSheet
 }) => {
   const handleDelete = onDeleteAdminRecord || onDeleteRecord;
   const [newEmail, setNewEmail] = useState('');
   const [selectedRole, setSelectedRole] = useState<'Admin' | 'Super Admin'>('Admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFormatting, setIsFormatting] = useState(false);
+  const [formatSuccess, setFormatSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Revoked'>('All');
   const [confirmRevokeEmail, setConfirmRevokeEmail] = useState<string | null>(null);
+
+  const handleFormatClick = async () => {
+    if (!onFormatAdminSheet) return;
+    setIsFormatting(true);
+    setFormatSuccess(false);
+    try {
+      await onFormatAdminSheet();
+      setFormatSuccess(true);
+      setTimeout(() => setFormatSuccess(false), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to format spreadsheet admin section.');
+    } finally {
+      setIsFormatting(false);
+    }
+  };
 
   const handleGrantSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,8 +277,8 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
                 </p>
               </div>
 
-              {/* Filters */}
-              <div className="flex items-center gap-2">
+              {/* Filters & Actions */}
+              <div className="flex items-center gap-2 flex-wrap">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#ADB5BD]" />
                   <input
@@ -279,6 +299,37 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
                   <option value="Active">Active Only</option>
                   <option value="Revoked">Revoked</option>
                 </select>
+
+                {onFormatAdminSheet && (
+                  <button
+                    type="button"
+                    onClick={handleFormatClick}
+                    disabled={isFormatting}
+                    title="Clean stray rows and apply professional Google Sheets formatting"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                      formatSuccess
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-white hover:bg-slate-50 text-[#2D3436] border-[#DEE2E6] shadow-xs'
+                    }`}
+                  >
+                    {isFormatting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#6C5CE7]" />
+                        <span className="text-[11px]">Formatting...</span>
+                      </>
+                    ) : formatSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-[11px]">Formatted!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                        <span className="text-[11px]">Format Sheet</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -524,8 +575,48 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
       </div>
 
       {/* Bottom Row: Utility & Maintenance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
+        {/* Organize & Format card */}
+        {onFormatAdminSheet && (
+          <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <h3 className="text-lg font-bold font-display text-[#2D3436]">Organize & Format Admin Tab</h3>
+              </div>
+              <p className="text-xs text-[#636E72] leading-relaxed mb-4">
+                Cleans out rogue cells, aligns column widths, freezes the header, and applies elegant Navy headers to your master Google Sheet.
+              </p>
+            </div>
+            <button
+              onClick={handleFormatClick}
+              disabled={isFormatting}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-sm cursor-pointer active:scale-98 disabled:opacity-50 ${
+                formatSuccess
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              }`}
+            >
+              {isFormatting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Organizing Spreadsheet...
+                </>
+              ) : formatSuccess ? (
+                <>
+                  <Check className="w-4 h-4" /> Spreadsheet Formatted!
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" /> Organize & Format Google Sheet
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Backups card */}
         {onExportBackup && (
           <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm flex flex-col justify-between">
@@ -534,7 +625,7 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
                 <div className="w-8 h-8 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-[#6C5CE7]">
                   <FileSpreadsheet className="w-4 h-4" />
                 </div>
-                <h3 className="text-lg font-bold font-display text-[#2D3436]">Spreadsheet Exports & Backups</h3>
+                <h3 className="text-lg font-bold font-display text-[#2D3436]">Spreadsheet Exports</h3>
               </div>
               <p className="text-xs text-[#636E72] leading-relaxed mb-4">
                 Generate an offline multi-tab XLSX backup containing full registries for Assets, Shipments, Gate Passes, Locations, and Audit Histories.
@@ -544,7 +635,7 @@ export const EnterpriseAdminView: React.FC<EnterpriseAdminViewProps> = ({
               onClick={onExportBackup}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer active:scale-98"
             >
-              <FileSpreadsheet className="w-4 h-4" /> Export Complete Database Snapshot (.xlsx)
+              <FileSpreadsheet className="w-4 h-4" /> Export Complete Snapshot (.xlsx)
             </button>
           </div>
         )}

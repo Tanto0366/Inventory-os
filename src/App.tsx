@@ -50,6 +50,7 @@ import {
   saveCampaignsSheet,
   saveAdminsSheet,
   appendAdminLog,
+  formatAndOrganizeAdminSheet,
   shareSpreadsheetWithUser,
   syncFullDatabase,
   ensureSpreadsheetSchema,
@@ -872,6 +873,21 @@ export default function App() {
       }
     });
     await logAdminAction('Admin Record Deleted', cleanEmail, 'Success');
+  };
+
+  const handleFormatAdminSheet = async () => {
+    assertSuperAdmin(user?.email, adminsList, 'format and organize spreadsheet admin section');
+    await runSheetSync(async (sheetId, activeToken) => {
+      await formatAndOrganizeAdminSheet(sheetId, activeToken, adminsList, adminLogs);
+      const reloaded = await loadSpreadsheetData(sheetId, activeToken);
+      if (reloaded.admins && reloaded.admins.length > 0) {
+        setAdminsList(reloaded.admins);
+      }
+      if (reloaded.adminLogs && reloaded.adminLogs.length > 0) {
+        setAdminLogs(reloaded.adminLogs);
+      }
+    });
+    await logAdminAction('Admin Sheet Formatted & Organized', 'Admin Worksheet', 'Success');
   };
 
   // Helper: Create log helper
@@ -1906,6 +1922,7 @@ export default function App() {
                   onDeleteRecord={handleDeleteAdminRecord}
                   onExportBackup={handleExportAll}
                   onWipeDatabase={handleWipeDatabase}
+                  onFormatAdminSheet={handleFormatAdminSheet}
                 />
 
               </div>
