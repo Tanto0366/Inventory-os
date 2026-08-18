@@ -1,7 +1,51 @@
 import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment } from '../types';
 import { expandAssetsWithQuantities } from './assetUtils';
+import { refreshGoogleAccessToken } from './firebase';
+
+export const MASTER_SPREADSHEET_ID = '1PTrgDLYa0aoNPjsNf0YgFEYw0ofd_pe7hr_K5hPKe7I';
 
 const DATABASE_NAME = 'InventoryOS_Database';
+
+/**
+ * Central Google API request helper that automatically intercepts 401 Unauthorized,
+ * requests fresh OAuth credentials via popup, and seamlessly retries.
+ */
+export async function googleFetch(
+  url: string,
+  options: RequestInit = {},
+  retry = true
+): Promise<Response> {
+  const token = localStorage.getItem('inventory_os_token');
+
+  if (!token) {
+    throw new Error('Google authentication is required.');
+  }
+
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+
+  let response = await fetch(url, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401 && retry) {
+    const freshToken = await refreshGoogleAccessToken();
+
+    if (!freshToken) {
+      throw new Error('Unable to refresh Google authentication.');
+    }
+
+    headers.set('Authorization', `Bearer ${freshToken}`);
+
+    response = await fetch(url, {
+      ...options,
+      headers
+    });
+  }
+
+  return response;
+}
 
 const REQUIRED_SHEETS = [
   'Dashboard',
@@ -274,22 +318,20 @@ const SAMPLE_LOCATIONS: LocationInfo[] = [
   { city: 'Kochi', address: 'Event Warehouse, Kakkanad', type: 'Site' }
 ];
 
-// 1. Get canonical master spreadsheet ID from environment
+// 1. Get canonical master spreadsheet ID from environment or master constant
 export function getCanonicalSpreadsheetId(): string | null {
   const envId = ((import.meta as any).env?.VITE_INVENTORYOS_SPREADSHEET_ID || '').trim();
-  return envId || null;
+  return envId || MASTER_SPREADSHEET_ID;
 }
 
 // Search for existing spreadsheet in user's Drive (including shared files)
-export async function findSpreadsheet(token: string): Promise<string | null> {
+export async function findSpreadsheet(token?: string): Promise<string | null> {
   const query = `name = '${DATABASE_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
   
   // Try wide search supporting shared files and all drives first
   try {
     const wideUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,owners,modifiedTime)&orderBy=modifiedTime desc&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`;
-    const res = await fetch(wideUrl, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await googleFetch(wideUrl);
     if (res.ok) {
       const data = await res.json();
       if (data.files && data.files.length > 0) {
@@ -303,9 +345,7 @@ export async function findSpreadsheet(token: string): Promise<string | null> {
   // Standard search fallback
   try {
     const standardUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,owners,modifiedTime)&orderBy=modifiedTime desc`;
-    const res = await fetch(standardUrl, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await googleFetch(standardUrl);
     if (res.ok) {
       const data = await res.json();
       if (data.files && data.files.length > 0) {
@@ -321,11 +361,11 @@ export async function findSpreadsheet(token: string): Promise<string | null> {
 
 /**
  * Resolves the master spreadsheet ID with canonical precedence:
- * 1. Configured VITE_INVENTORYOS_SPREADSHEET_ID env var
+ * 1. Configured VITE_INVENTORYOS_SPREADSHEET_ID env var or canonical default
  * 2. Explicitly passed target spreadsheet ID (e.g. manually connected)
  * 3. Drive discovery for InventoryOS_Database (including shared drives)
  */
-export async function resolveMasterSpreadsheetId(token: string, explicitId?: string): Promise<string | null> {
+export async function resolveMasterSpreadsheetId(token?: string, explicitId?: string): Promise<string | null> {
   const canonical = getCanonicalSpreadsheetId();
   if (canonical) {
     return canonical;
@@ -348,16 +388,15 @@ export async function resolveMasterSpreadsheetId(token: string, explicitId?: str
  */
 export async function shareSpreadsheetWithUser(
   spreadsheetId: string,
-  token: string,
-  email: string,
+  token?: string,
+  email: string = '',
   role: 'writer' | 'reader' = 'writer'
 ): Promise<boolean> {
   try {
     const url = `https://www.googleapis.com/drive/v3/files/${spreadsheetId}/permissions?sendNotificationEmail=false&supportsAllDrives=true`;
-    const res = await fetch(url, {
+    const res = await googleFetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -406,7 +445,7 @@ export async function handleGoogleApiError(res: Response, context?: string): Pro
 /**
  * Verifies spreadsheet exists, inspects worksheet metadata, and automatically creates missing tabs & default headers.
  */
-export async function ensureSpreadsheetSchema(spreadsheetId: string, token: string, force = false): Promise<void> {
+export async function ensureSpreadsheetSchema(spreadsheetId: string, token?: string, force = false): Promise<void> {
   const lastVerified = verifiedSpreadsheets.get(spreadsheetId);
   const now = Date.now();
   if (!force && lastVerified && now - lastVerified < 30000) {
@@ -415,9 +454,7 @@ export async function ensureSpreadsheetSchema(spreadsheetId: string, token: stri
 
   // 1. Verify spreadsheet exists & read worksheet metadata
   const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
-  const metaRes = await fetch(metaUrl, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const metaRes = await googleFetch(metaUrl);
   if (!metaRes.ok) {
     await handleGoogleApiError(metaRes, 'Failed to fetch spreadsheet metadata');
   }
@@ -459,10 +496,9 @@ export async function ensureSpreadsheetSchema(spreadsheetId: string, token: stri
 
   if (requests.length > 0) {
     const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-    const batchRes = await fetch(batchUrl, {
+    const batchRes = await googleFetch(batchUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ requests })
@@ -505,20 +541,19 @@ export async function ensureSpreadsheetSchema(spreadsheetId: string, token: stri
   }
 
   if (headerUpdates.length > 0) {
-    await writeBatchValues(spreadsheetId, token, headerUpdates);
+    await writeBatchValues(spreadsheetId, token || '', headerUpdates);
   }
 
   verifiedSpreadsheets.set(spreadsheetId, now);
 }
 
 // 2. Create and provision a brand new spreadsheet with all sheets and headers
-export async function createAndProvisionSpreadsheet(token: string): Promise<SheetData> {
+export async function createAndProvisionSpreadsheet(token?: string): Promise<SheetData> {
   // Create spreadsheet container
   const url = 'https://sheets.googleapis.com/v4/spreadsheets';
-  const createRes = await fetch(url, {
+  const createRes = await googleFetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -558,10 +593,9 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
   });
 
   const batchUpdateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-  const batchRes = await fetch(batchUpdateUrl, {
+  const batchRes = await googleFetch(batchUpdateUrl, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ requests })
@@ -613,7 +647,7 @@ export async function createAndProvisionSpreadsheet(token: string): Promise<Shee
     { range: 'Admin!I1:M1', values: [['Timestamp', 'Action', 'Target Email', 'Performed By', 'Result']] }
   ];
 
-  await writeBatchValues(spreadsheetId, token, updates);
+  await writeBatchValues(spreadsheetId, token || '', updates);
   verifiedSpreadsheets.set(spreadsheetId, Date.now());
 
   return {
@@ -642,60 +676,52 @@ export interface ReadAdminRecordsResult {
 }
 
 /**
+ * Direct loader for the master Admin authorization ledger.
+ * Throws explicit descriptive errors if unavailable or empty.
+ */
+export async function loadAdminLedger(
+  spreadsheetId: string,
+  _token?: string
+): Promise<AdminUser[]> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!A1:G500')}`;
+
+  const res = await googleFetch(url);
+
+  if (!res.ok) {
+    await handleGoogleApiError(
+      res,
+      'Failed to load InventoryOS authorization ledger'
+    );
+  }
+
+  const result = await res.json();
+
+  if (!result.values) {
+    throw new Error(
+      'InventoryOS authorization ledger is empty or unavailable.'
+    );
+  }
+
+  const admins = parseRowsToAdmins(result.values);
+  if (!admins || admins.length === 0) {
+    throw new Error(
+      'Authorization ledger could not be loaded from the master Google Sheet.'
+    );
+  }
+
+  return admins;
+}
+
+/**
  * Step 1 of permission architecture: Read ONLY Admin!A:G from master Google Spreadsheet.
  * Does NOT touch any other worksheet.
  */
 export async function readAdminRecordsOnly(
   spreadsheetId: string,
-  token: string
+  token?: string
 ): Promise<ReadAdminRecordsResult> {
-  const range = 'Admin!A1:G500';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
-
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    if (!res.ok) {
-      let errorMsg = `Google Sheets API Error (${res.status})`;
-      try {
-        const errJson = await res.json();
-        if (errJson.error?.message) {
-          errorMsg = errJson.error.message;
-        }
-      } catch {
-        const text = await res.text();
-        if (text) errorMsg = text;
-      }
-      return {
-        ok: false,
-        admins: [],
-        error: errorMsg,
-        statusCode: res.status
-      };
-    }
-
-    const json = await res.json();
-    const rows = json.values;
-
-    if (!rows || !Array.isArray(rows) || rows.length === 0) {
-      return {
-        ok: false,
-        admins: [],
-        error: 'The Admin worksheet in the connected master spreadsheet returned no rows or records.'
-      };
-    }
-
-    const admins = parseRowsToAdmins(rows);
-    if (!admins || admins.length === 0) {
-      return {
-        ok: false,
-        admins: [],
-        error: 'No valid administrator records found in Admin!A:G.'
-      };
-    }
-
+    const admins = await loadAdminLedger(spreadsheetId, token);
     return {
       ok: true,
       admins
@@ -710,14 +736,14 @@ export async function readAdminRecordsOnly(
 }
 
 // 3. Load entire database from spreadsheet in batch with prior schema check (Super Admin mode)
-export async function loadSpreadsheetData(spreadsheetId: string, token: string): Promise<SheetData> {
+export async function loadSpreadsheetData(spreadsheetId: string, token?: string): Promise<SheetData> {
   // Ensure schema exists before querying batch ranges to avoid "Unable to parse range"
   await ensureSpreadsheetSchema(spreadsheetId, token);
   return loadSpreadsheetDataReadOnly(spreadsheetId, token);
 }
 
 // 3b. Read-Only Database Loader for Admin Users (NEVER creates worksheets, NEVER writes headers, NEVER alters structure)
-export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, token: string): Promise<SheetData> {
+export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, _token?: string): Promise<SheetData> {
   const ranges = [
     'Assets Database!A1:R2000',
     'Gate Pass!A1:M1000',
@@ -734,9 +760,7 @@ export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, token: 
   const queryParams = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${queryParams}`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  const res = await googleFetch(url);
 
   if (!res.ok) {
     await handleGoogleApiError(res, 'Google Sheets Error during batch data load');
@@ -755,6 +779,12 @@ export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, token: 
   const adminLogs = parseRowsToAdminLogs(valueRanges[8]?.values || []);
   const shipments = parseRowsToShipments(valueRanges[9]?.values || []);
 
+  if (!admins || admins.length === 0) {
+    throw new Error(
+      'Authorization ledger could not be loaded from the master Google Sheet.'
+    );
+  }
+
   return {
     spreadsheetId,
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
@@ -766,17 +796,7 @@ export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, token: 
     owners,
     possessors,
     locations,
-    admins: admins.length > 0 ? admins : [
-      {
-        email: 'aditya@aftermathventures.in',
-        role: 'SUPER_ADMIN',
-        status: 'Protected',
-        grantedBy: 'System',
-        grantedOn: '2026-08-14',
-        lastLogin: new Date().toISOString().split('T')[0],
-        lastUpdated: new Date().toISOString().split('T')[0]
-      }
-    ],
+    admins,
     adminLogs
   };
 }
@@ -819,9 +839,8 @@ export async function syncFullDatabase(
 // Helper: Clear a specific range
 async function clearRange(spreadsheetId: string, token: string, range: string): Promise<void> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
+  const res = await googleFetch(url, {
+    method: 'POST'
   });
   if (!res.ok) {
     console.warn(`Clear range warning on "${range}":`, res.statusText);
@@ -862,10 +881,9 @@ export async function appendGatePass(spreadsheetId: string, token: string, gp: G
   const range = 'Gate Pass!A2';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
-  const res = await fetch(url, {
+  const res = await googleFetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -884,10 +902,9 @@ export async function appendAuditLog(spreadsheetId: string, token: string, log: 
   const range = 'Audit Trail!A2';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
   
-  const res = await fetch(url, {
+  const res = await googleFetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -914,10 +931,9 @@ async function writeBatchValues(spreadsheetId: string, token: string, updates: {
     valueInputOption: 'USER_ENTERED',
     data: updates.map(u => ({ range: u.range, values: u.values }))
   };
-  const res = await fetch(url, {
+  const res = await googleFetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(data)
@@ -929,10 +945,9 @@ async function writeBatchValues(spreadsheetId: string, token: string, updates: {
 
 async function writeValues(spreadsheetId: string, token: string, range: string, values: any[][]): Promise<void> {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
-  const res = await fetch(url, {
+  const res = await googleFetch(url, {
     method: 'PUT',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ values })
@@ -1443,7 +1458,7 @@ export async function formatAndOrganizeAdminSheet(
 
   // 1. Fetch spreadsheet metadata to get the sheetId of the Admin tab
   const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
-  const metaRes = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const metaRes = await googleFetch(metaUrl);
   if (!metaRes.ok) {
     await handleGoogleApiError(metaRes, 'Failed to inspect Admin sheet properties');
   }
@@ -1500,9 +1515,8 @@ export async function formatAndOrganizeAdminSheet(
   let logsToWrite: AdminLog[] = adminLogs || [];
   if (!adminLogs || adminLogs.length === 0) {
     try {
-      const logsRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!I2:M200')}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const logsRes = await googleFetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!I2:M200')}`
       );
       if (logsRes.ok) {
         const logsData = await logsRes.json();
@@ -1737,10 +1751,9 @@ export async function formatAndOrganizeAdminSheet(
 
   // Execute batchUpdate
   const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
-  const batchRes = await fetch(batchUrl, {
+  const batchRes = await googleFetch(batchUrl, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ requests })
@@ -1768,7 +1781,7 @@ export async function appendAdminLog(spreadsheetId: string, token: string, log: 
     
     // Read current logs in Column I to calculate the next empty row
     const checkUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('Admin!I1:I500')}`;
-    const checkRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${token}` } });
+    const checkRes = await googleFetch(checkUrl);
     let nextRow = 2;
     if (checkRes.ok) {
       const data = await checkRes.json();

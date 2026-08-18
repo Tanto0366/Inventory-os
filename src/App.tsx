@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment, ShipmentAssetItem } from './types';
-import { initAuth, googleSignIn, logout, getAccessToken } from './lib/firebase';
+import { initAuth, googleSignIn, logout, getAccessToken, refreshGoogleAccessToken } from './lib/firebase';
 import { 
   findSpreadsheet, 
   resolveMasterSpreadsheetId,
@@ -41,6 +41,7 @@ import {
   loadSpreadsheetData, 
   loadSpreadsheetDataReadOnly,
   readAdminRecordsOnly,
+  loadAdminLedger,
   saveAssetsSheet, 
   saveShipmentsSheet,
   saveGatePassesSheet,
@@ -485,6 +486,32 @@ export default function App() {
     } finally {
       setIsVerifyingAuth(false);
       setIsSyncing(false);
+    }
+  };
+
+  // Full re-authentication & authorization refresh flow:
+  // Fresh Google OAuth token acquisition -> Master Sheet resolve -> loadAdminLedger -> Resolve role -> State sync
+  const handleRefreshAuthorization = async (customSheetId?: string) => {
+    setIsVerifyingAuth(true);
+    try {
+      let freshToken: string | null = null;
+      try {
+        freshToken = await refreshGoogleAccessToken();
+      } catch (e) {
+        console.warn('OAuth refresh popup info:', e);
+      }
+
+      const activeToken = freshToken || token || localStorage.getItem('inventory_os_token');
+      if (activeToken) {
+        setToken(activeToken);
+      }
+      await executeAuthorizationPipeline(user, activeToken, customSheetId);
+    } catch (err: any) {
+      console.error('Failed to refresh authorization:', err);
+      setAuthStage('DATA_ERROR');
+      setAuthDataError(err.message || 'Failed to refresh authorization.');
+    } finally {
+      setIsVerifyingAuth(false);
     }
   };
 
@@ -1475,9 +1502,7 @@ export default function App() {
         isDataError={true}
         errorMessage={authDataError}
         onLogout={handleLogout}
-        onRefreshAuth={async (customSheetId?: string) => {
-          await executeAuthorizationPipeline(user, token, customSheetId);
-        }}
+        onRefreshAuth={handleRefreshAuthorization}
         isChecking={isVerifyingAuth}
         currentSpreadsheetId={spreadsheetId}
         adminsCount={adminsList.length}
@@ -1494,9 +1519,7 @@ export default function App() {
         isDataError={false}
         errorMessage={null}
         onLogout={handleLogout}
-        onRefreshAuth={async (customSheetId?: string) => {
-          await executeAuthorizationPipeline(user, token, customSheetId);
-        }}
+        onRefreshAuth={handleRefreshAuthorization}
         isChecking={isVerifyingAuth}
         currentSpreadsheetId={spreadsheetId}
         adminsCount={adminsList.length}
