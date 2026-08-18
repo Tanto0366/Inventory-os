@@ -518,7 +518,7 @@ export async function ensureSpreadsheetSchema(spreadsheetId: string, token?: str
     headerUpdates.push({ range: 'Shipment Tracker!A1:AG1', values: [HEADERS['Shipment Tracker']] });
   }
   if (missingTabs.includes('Gate Pass')) {
-    headerUpdates.push({ range: 'Gate Pass!A1:M1', values: [HEADERS['Gate Pass']] });
+    headerUpdates.push({ range: 'Gate Pass!A1:O1', values: [HEADERS['Gate Pass']] });
   }
   if (missingTabs.includes('Audit Trail')) {
     headerUpdates.push({ range: 'Audit Trail!A1:G1', values: [HEADERS['Audit Trail']] });
@@ -630,8 +630,8 @@ export async function createAndProvisionSpreadsheet(token?: string): Promise<She
     { range: `Assets Database!A2:R${SAMPLE_ASSETS.length + 1}`, values: SAMPLE_ASSETS.map(mapAssetToRow) },
     { range: 'Shipment Tracker!A1:AG1', values: [HEADERS['Shipment Tracker']] },
     { range: `Shipment Tracker!A2:AG${SAMPLE_SHIPMENTS.length + 1}`, values: SAMPLE_SHIPMENTS.map(mapShipmentToRow) },
-    { range: 'Gate Pass!A1:M1', values: [HEADERS['Gate Pass']] },
-    { range: `Gate Pass!A2:M${SAMPLE_GATE_PASSES.length + 1}`, values: SAMPLE_GATE_PASSES.map(mapGatePassToRow) },
+    { range: 'Gate Pass!A1:O1', values: [HEADERS['Gate Pass']] },
+    { range: `Gate Pass!A2:O${SAMPLE_GATE_PASSES.length + 1}`, values: SAMPLE_GATE_PASSES.map(mapGatePassToRow) },
     { range: 'Audit Trail!A1:G1', values: [HEADERS['Audit Trail']] },
     { range: `Audit Trail!A2:G${SAMPLE_AUDIT.length + 1}`, values: SAMPLE_AUDIT.map(mapAuditToRow) },
     { range: 'Campaigns!A1:H1', values: [HEADERS['Campaigns']] },
@@ -746,7 +746,7 @@ export async function loadSpreadsheetData(spreadsheetId: string, token?: string)
 export async function loadSpreadsheetDataReadOnly(spreadsheetId: string, _token?: string): Promise<SheetData> {
   const ranges = [
     'Assets Database!A1:R2000',
-    'Gate Pass!A1:M1000',
+    'Gate Pass!A1:O1000',
     'Audit Trail!A1:G3000',
     'Campaigns!A1:H500',
     'Owners!A1:C500',
@@ -860,9 +860,21 @@ export async function saveAssetsSheet(spreadsheetId: string, token: string, asse
 export async function saveGatePassesSheet(spreadsheetId: string, token: string, gatePasses: GatePass[]): Promise<void> {
   await ensureSpreadsheetSchema(spreadsheetId, token);
   const values = gatePasses.map(mapGatePassToRow);
-  const clearRangeName = `Gate Pass!A2:M${Math.max(gatePasses.length + 100, 200)}`;
-  await clearRange(spreadsheetId, token, clearRangeName);
-  await writeValues(spreadsheetId, token, `Gate Pass!A1:M${gatePasses.length + 1}`, [HEADERS['Gate Pass'], ...values]);
+  const clearRangeName =
+  `Gate Pass!A2:O${Math.max(gatePasses.length + 100, 200)}`;
+
+await clearRange(
+  spreadsheetId,
+  token,
+  clearRangeName
+);
+
+await writeValues(
+  spreadsheetId,
+  token,
+  `Gate Pass!A1:O${gatePasses.length + 1}`,
+  [HEADERS['Gate Pass'], ...values]
+);
 }
 
 // Save all Audit Logs
