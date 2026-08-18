@@ -1,5 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import {
+  getAuth,
+  signInWithPopup,
+  reauthenticateWithPopup,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  User
+} from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -67,6 +74,41 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 export const getAccessToken = async (): Promise<string | null> => {
   if (cachedAccessToken) return cachedAccessToken;
   return localStorage.getItem('inventory_os_token');
+};
+
+export const refreshGoogleAccessToken = async (): Promise<string | null> => {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  try {
+    const result = await reauthenticateWithPopup(currentUser, provider);
+
+    const credential =
+      GoogleAuthProvider.credentialFromResult(result);
+
+    if (!credential?.accessToken) {
+      throw new Error('Google did not return a fresh OAuth access token.');
+    }
+
+    cachedAccessToken = credential.accessToken;
+
+    localStorage.setItem(
+      'inventory_os_token',
+      credential.accessToken
+    );
+
+    return credential.accessToken;
+  } catch (error) {
+    console.error('Failed to refresh Google access token:', error);
+
+    cachedAccessToken = null;
+    localStorage.removeItem('inventory_os_token');
+
+    throw error;
+  }
 };
 
 export const logout = async () => {
