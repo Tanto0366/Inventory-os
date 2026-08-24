@@ -1064,40 +1064,72 @@ function mapCampaignToRow(c: Campaign): any[] {
 }
 
 // Parser Utilities
-function parseRowsToAssets(rows: any[][]): Asset[] {
-  if (rows.length <= 1) return [];
-  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
 
-  // Helper to dynamically resolve column index by header names with fallback
-  const getCol = (possibleNames: string[], defaultIdx: number): number => {
-    for (const name of possibleNames) {
-      const idx = headerRow.indexOf(name.toLowerCase());
-      if (idx !== -1) return idx;
+/**
+ * Normalizes a header key (alphanumeric only, lowercase)
+ */
+export function normalizeHeaderKey(key: any): string {
+  return String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Creates a robust header resolver that searches for aliases in the normalized header map.
+ * If no header row exists or no alias matches, falls back to the provided default index.
+ */
+export function createColumnResolver(headerRow: any[]) {
+  const normalizedHeaders = (headerRow || []).map((h, i) => ({
+    key: normalizeHeaderKey(h),
+    raw: String(h || '').trim().toLowerCase(),
+    index: i
+  }));
+
+  const keyMap = new Map<string, number>();
+  for (const h of normalizedHeaders) {
+    if (h.key && !keyMap.has(h.key)) {
+      keyMap.set(h.key, h.index);
     }
-    return defaultIdx;
+  }
+
+  return function getColIndex(aliases: string[], fallbackIndex: number): number {
+    for (const alias of aliases) {
+      const norm = normalizeHeaderKey(alias);
+      if (keyMap.has(norm)) {
+        return keyMap.get(norm)!;
+      }
+      const rawMatch = normalizedHeaders.find(h => h.raw === alias.toLowerCase() || h.raw.includes(alias.toLowerCase()));
+      if (rawMatch) {
+        return rawMatch.index;
+      }
+    }
+    return fallbackIndex;
   };
+}
 
-  const hasBoxInHeader = headerRow.includes('box id') || headerRow.includes('box') || headerRow.includes('boxid');
-  const is18ColFormat = hasBoxInHeader || (rows[1] && rows[1].length >= 18);
+export function parseRowsToAssets(rows: any[][]): Asset[] {
+  if (!rows || rows.length <= 1) return [];
+  const headerRow = rows[0] || [];
+  const getCol = createColumnResolver(headerRow);
 
-  const assetIdIdx = getCol(['asset id', 'assetid', 'id'], 0);
-  const serialIdx = getCol(['serial number', 'serial', 'serial no', 'serialno', 'sn'], 1);
-  const boxIdIdx = getCol(['box id', 'box', 'boxid', 'box no'], hasBoxInHeader ? headerRow.indexOf('box id') : -1);
-  
-  // When Box ID is present at index 2, standard 18-col indices apply
-  const nameIdx = getCol(['item name', 'name', 'item', 'product'], is18ColFormat ? 3 : 2);
-  const brandIdx = getCol(['brand', 'make', 'oem'], is18ColFormat ? 4 : 3);
-  const descIdx = getCol(['description', 'desc', 'model', 'specs'], is18ColFormat ? 5 : 4);
-  const qtyIdx = getCol(['quantity', 'qty', 'count', 'units'], is18ColFormat ? 6 : 5);
-  const cityIdx = getCol(['location', 'city', 'warehouse', 'site', 'current location'], is18ColFormat ? 7 : 6);
-  const ownerIdx = getCol(['owner', 'company', 'client'], is18ColFormat ? 8 : 7);
-  const possessorIdx = getCol(['current possessor', 'possessor', 'custodian', 'holder', 'manager'], is18ColFormat ? 9 : 8);
+  const headerNorm = headerRow.map(h => normalizeHeaderKey(h));
+  const hasBoxHeader = headerNorm.some(h => h.includes('box'));
+  const is18ColFormat = hasBoxHeader || (rows[1] && rows[1].length >= 18);
+
+  const assetIdIdx = getCol(['asset id', 'assetid', 'id', 'ast id'], 0);
+  const serialIdx = getCol(['serial number', 'serial no', 'serialno', 'serial', 'sn', 'sr no'], 1);
+  const boxIdIdx = getCol(['box id', 'boxid', 'box no', 'boxno', 'box', 'carton'], is18ColFormat ? 2 : -1);
+  const nameIdx = getCol(['item name', 'itemname', 'item', 'product name', 'product', 'asset name', 'name', 'model name'], is18ColFormat ? 3 : 2);
+  const brandIdx = getCol(['brand', 'make', 'manufacturer', 'oem'], is18ColFormat ? 4 : 3);
+  const descIdx = getCol(['description', 'desc', 'model', 'specs', 'details'], is18ColFormat ? 5 : 4);
+  const qtyIdx = getCol(['quantity', 'qty', 'count', 'units', 'pieces', 'pcs'], is18ColFormat ? 6 : 5);
+  const cityIdx = getCol(['location', 'city', 'warehouse', 'site', 'current location', 'hub'], is18ColFormat ? 7 : 6);
+  const ownerIdx = getCol(['owner', 'company', 'client', 'organization'], is18ColFormat ? 8 : 7);
+  const possessorIdx = getCol(['current possessor', 'possessor', 'custodian', 'holder', 'manager', 'in custody of'], is18ColFormat ? 9 : 8);
   const campaignIdx = getCol(['campaign', 'event', 'project', 'activity'], is18ColFormat ? 10 : 9);
   const statusIdx = getCol(['status', 'state', 'asset status'], is18ColFormat ? 11 : 10);
-  const receivedByIdx = getCol(['received by', 'receiver', 'accepted by'], is18ColFormat ? 12 : 11);
-  const receivedOnIdx = getCol(['received on', 'received date', 'date received'], is18ColFormat ? 13 : 12);
+  const receivedByIdx = getCol(['received by', 'receiver', 'accepted by', 'recipient'], is18ColFormat ? 12 : 11);
+  const receivedOnIdx = getCol(['received on', 'received date', 'date received', 'check in date'], is18ColFormat ? 13 : 12);
   const shippingToIdx = getCol(['shipping to', 'destination', 'ship to', 'dispatched to'], is18ColFormat ? 14 : 13);
-  const shippingDateIdx = getCol(['shipping date', 'ship date', 'dispatched date'], is18ColFormat ? 15 : 14);
+  const shippingDateIdx = getCol(['shipping date', 'ship date', 'dispatched date', 'dispatch date'], is18ColFormat ? 15 : 14);
   const createdDateIdx = getCol(['created date', 'created on', 'date added', 'created'], is18ColFormat ? 16 : 15);
   const lastUpdatedIdx = getCol(['last updated', 'updated on', 'last modified', 'updated'], is18ColFormat ? 17 : 16);
 
@@ -1109,7 +1141,7 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
     const name = String(r[nameIdx] || '').trim();
     const brand = String(r[brandIdx] || '').trim();
     const desc = String(r[descIdx] || '').trim();
-    const qty = parseInt(String(r[qtyIdx] || '1')) || 1;
+    const qty = parseInt(String(r[qtyIdx] || '1'), 10) || 1;
     const city = String(r[cityIdx] || '').trim();
     const owner = String(r[ownerIdx] || '').trim();
     const possessor = String(r[possessorIdx] || '').trim();
@@ -1148,19 +1180,12 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
   return expandAssetsWithQuantities(rawAssets);
 }
 
-function parseRowsToGatePasses(rows: any[][]): GatePass[] {
-  if (rows.length <= 1) return [];
-  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
-  
-  const getCol = (possibleNames: string[], defaultIdx: number): number => {
-    for (const name of possibleNames) {
-      const idx = headerRow.indexOf(name.toLowerCase());
-      if (idx !== -1) return idx;
-    }
-    return defaultIdx;
-  };
+export function parseRowsToGatePasses(rows: any[][]): GatePass[] {
+  if (!rows || rows.length <= 1) return [];
+  const headerRow = rows[0] || [];
+  const getCol = createColumnResolver(headerRow);
 
-  const idIdx = getCol(['gate pass number', 'gate pass id', 'id', 'pass number'], 0);
+  const idIdx = getCol(['gate pass number', 'gate pass id', 'id', 'pass number', 'gp id'], 0);
   const typeIdx = getCol(['pass type', 'type'], 1);
   const companyIdx = getCol(['company', 'organization'], 2);
   const serialsIdx = getCol(['serials', 'serial numbers', 'asset serials'], 3);
@@ -1207,8 +1232,8 @@ function parseRowsToGatePasses(rows: any[][]): GatePass[] {
   }).filter(g => g.id);
 }
 
-function parseRowsToAudit(rows: any[][]): AuditEntry[] {
-  if (rows.length <= 1) return [];
+export function parseRowsToAudit(rows: any[][]): AuditEntry[] {
+  if (!rows || rows.length <= 1) return [];
   const body = rows.slice(1);
   return body.map(r => ({
     time: String(r[0] || ''),
@@ -1221,8 +1246,8 @@ function parseRowsToAudit(rows: any[][]): AuditEntry[] {
   })).filter(l => l.serial);
 }
 
-function parseRowsToCampaigns(rows: any[][]): Campaign[] {
-  if (rows.length <= 1) return [];
+export function parseRowsToCampaigns(rows: any[][]): Campaign[] {
+  if (!rows || rows.length <= 1) return [];
   return rows.slice(1).map(r => ({
     name: String(r[0] || ''),
     client: String(r[1] || ''),
@@ -1235,8 +1260,8 @@ function parseRowsToCampaigns(rows: any[][]): Campaign[] {
   })).filter(c => c.name);
 }
 
-function parseRowsToOwners(rows: any[][]): Owner[] {
-  if (rows.length <= 1) return [];
+export function parseRowsToOwners(rows: any[][]): Owner[] {
+  if (!rows || rows.length <= 1) return [];
   return rows.slice(1).map(r => ({
     name: String(r[0] || ''),
     company: String(r[1] || ''),
@@ -1244,8 +1269,8 @@ function parseRowsToOwners(rows: any[][]): Owner[] {
   })).filter(o => o.name);
 }
 
-function parseRowsToPossessors(rows: any[][]): Possessor[] {
-  if (rows.length <= 1) return [];
+export function parseRowsToPossessors(rows: any[][]): Possessor[] {
+  if (!rows || rows.length <= 1) return [];
   return rows.slice(1).map(r => ({
     name: String(r[0] || ''),
     role: String(r[1] || ''),
@@ -1253,8 +1278,8 @@ function parseRowsToPossessors(rows: any[][]): Possessor[] {
   })).filter(p => p.name);
 }
 
-function parseRowsToLocations(rows: any[][]): LocationInfo[] {
-  if (rows.length <= 1) return [];
+export function parseRowsToLocations(rows: any[][]): LocationInfo[] {
+  if (!rows || rows.length <= 1) return [];
   return rows.slice(1).map(r => ({
     city: String(r[0] || ''),
     address: String(r[1] || ''),
@@ -1381,15 +1406,8 @@ export function mapShipmentToRow(s: Shipment): any[] {
 
 export function parseRowsToShipments(rows: any[][]): Shipment[] {
   if (!rows || rows.length <= 1) return [];
-  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
-
-  const getCol = (possibleNames: string[], defaultIdx: number): number => {
-    for (const name of possibleNames) {
-      const idx = headerRow.indexOf(name.toLowerCase());
-      if (idx !== -1) return idx;
-    }
-    return defaultIdx;
-  };
+  const headerRow = rows[0] || [];
+  const getCol = createColumnResolver(headerRow);
 
   const idIdx = getCol(['shipment id', 'id', 'shipment number'], 0);
   const gatePassIdIdx = getCol(['gate pass id', 'gate pass number', 'gp id'], 1);
