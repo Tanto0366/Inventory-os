@@ -1,6 +1,7 @@
 import { AdminUser, AppRole } from '../types';
+import { getPrimarySuperAdminEmail } from '../services/configService';
 
-export const PRIMARY_SUPER_ADMIN_EMAIL = 'aditya@aftermathventures.in';
+export const PRIMARY_SUPER_ADMIN_EMAIL = getPrimarySuperAdminEmail();
 
 export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'REVOKED' | 'UNAUTHORIZED';
 
@@ -27,7 +28,7 @@ export function normalizeEmail(email?: string | null): string {
  * Checks if the email is the permanent protected Primary Super Admin.
  */
 export function isPrimarySuperAdmin(email?: string | null): boolean {
-  return normalizeEmail(email) === normalizeEmail(PRIMARY_SUPER_ADMIN_EMAIL);
+  return normalizeEmail(email) === normalizeEmail(getPrimarySuperAdminEmail());
 }
 
 /**

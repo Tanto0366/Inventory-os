@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { ShipmentManifestModal } from './ShipmentManifestModal';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, PieChart, Pie } from 'recharts';
+import { assertLegalShipmentTransition } from '../domain/stateMachine';
 
 interface ShipmentsViewProps {
   shipments: Shipment[];
@@ -177,6 +178,13 @@ export const ShipmentsView: React.FC<ShipmentsViewProps> = ({
 
     const oldStatus = statusModalShipment.status;
     const newStatus = updateForm.status;
+
+    try {
+      assertLegalShipmentTransition(oldStatus, newStatus, statusModalShipment.id);
+    } catch (err: any) {
+      alert(err.message);
+      return;
+    }
 
     // Create new timeline event
     const newTimelineEvent = {

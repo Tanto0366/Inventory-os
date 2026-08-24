@@ -1,19 +1,27 @@
 import { Asset, GatePass, AuditEntry, Campaign, Owner, Possessor, LocationInfo, AdminUser, AdminLog, Shipment } from '../types';
 import { expandAssetsWithQuantities } from './assetUtils';
 import { refreshGoogleAccessToken } from './firebase';
+import { getCanonicalSpreadsheetId, DEFAULT_MASTER_SPREADSHEET_ID, DATABASE_NAME } from '../services/configService';
 
-export const MASTER_SPREADSHEET_ID = '1PTrgDLYa0aoNPjsNf0YgFEYw0ofd_pe7hr_K5hPKe7I';
+export const MASTER_SPREADSHEET_ID = DEFAULT_MASTER_SPREADSHEET_ID;
 
-const DATABASE_NAME = 'InventoryOS_Database';
+export { getCanonicalSpreadsheetId };
 
 /**
- * Central Google API request helper that automatically intercepts 401 Unauthorized,
- * requests fresh OAuth credentials via popup, and seamlessly retries.
+ * Helper to pause execution with exponential backoff delay
+ */
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Central Google API request helper that automatically intercepts:
+ * - 401 Unauthorized: requests fresh OAuth credentials via popup, and seamlessly retries.
+ * - 429 Quota Exceeded / 503 Service Unavailable: applies exponential backoff with jitter.
  */
 export async function googleFetch(
   url: string,
   options: RequestInit = {},
-  retry = true
+  retry = true,
+  maxRetries = 3
 ): Promise<Response> {
   const token = localStorage.getItem('inventory_os_token');
 
@@ -24,27 +32,50 @@ export async function googleFetch(
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
 
-  let response = await fetch(url, {
-    ...options,
-    headers
-  });
+  let attempt = 0;
+  let delay = 1000;
 
-  if (response.status === 401 && retry) {
-    const freshToken = await refreshGoogleAccessToken();
+  while (attempt <= maxRetries) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers
+      });
 
-    if (!freshToken) {
-      throw new Error('Unable to refresh Google authentication.');
+      // Handle 401: Refresh Token and retry
+      if (response.status === 401 && retry && attempt === 0) {
+        attempt++;
+        const freshToken = await refreshGoogleAccessToken();
+        if (!freshToken) {
+          throw new Error('Unable to refresh Google authentication.');
+        }
+        headers.set('Authorization', `Bearer ${freshToken}`);
+        continue;
+      }
+
+      // Handle 429 or 503: Exponential backoff with jitter
+      if ((response.status === 429 || response.status === 503) && attempt < maxRetries) {
+        attempt++;
+        const jitter = Math.floor(Math.random() * 500);
+        await sleep(delay + jitter);
+        delay = Math.min(delay * 2, 8000);
+        continue;
+      }
+
+      return response;
+    } catch (networkError: any) {
+      if (attempt < maxRetries && (networkError.name === 'TypeError' || networkError.message?.includes('Failed to fetch'))) {
+        attempt++;
+        await sleep(delay);
+        delay = Math.min(delay * 2, 8000);
+        continue;
+      }
+      throw networkError;
     }
-
-    headers.set('Authorization', `Bearer ${freshToken}`);
-
-    response = await fetch(url, {
-      ...options,
-      headers
-    });
   }
 
-  return response;
+  // Final fallback request
+  return fetch(url, { ...options, headers });
 }
 
 const REQUIRED_SHEETS = [
@@ -317,12 +348,6 @@ const SAMPLE_LOCATIONS: LocationInfo[] = [
   { city: 'Delhi', address: 'Practice Office Delhi, Connaught Place', type: 'Site' },
   { city: 'Kochi', address: 'Event Warehouse, Kakkanad', type: 'Site' }
 ];
-
-// 1. Get canonical master spreadsheet ID from environment or master constant
-export function getCanonicalSpreadsheetId(): string | null {
-  const envId = ((import.meta as any).env?.VITE_INVENTORYOS_SPREADSHEET_ID || '').trim();
-  return envId || MASTER_SPREADSHEET_ID;
-}
 
 // Search for existing spreadsheet in user's Drive (including shared files)
 export async function findSpreadsheet(token?: string): Promise<string | null> {
@@ -1042,90 +1067,67 @@ function mapCampaignToRow(c: Campaign): any[] {
 function parseRowsToAssets(rows: any[][]): Asset[] {
   if (rows.length <= 1) return [];
   const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
-  const boxIdIdx = headerRow.indexOf('box id');
+
+  // Helper to dynamically resolve column index by header names with fallback
+  const getCol = (possibleNames: string[], defaultIdx: number): number => {
+    for (const name of possibleNames) {
+      const idx = headerRow.indexOf(name.toLowerCase());
+      if (idx !== -1) return idx;
+    }
+    return defaultIdx;
+  };
+
+  const hasBoxInHeader = headerRow.includes('box id') || headerRow.includes('box') || headerRow.includes('boxid');
+  const is18ColFormat = hasBoxInHeader || (rows[1] && rows[1].length >= 18);
+
+  const assetIdIdx = getCol(['asset id', 'assetid', 'id'], 0);
+  const serialIdx = getCol(['serial number', 'serial', 'serial no', 'serialno', 'sn'], 1);
+  const boxIdIdx = getCol(['box id', 'box', 'boxid', 'box no'], hasBoxInHeader ? headerRow.indexOf('box id') : -1);
+  
+  // When Box ID is present at index 2, standard 18-col indices apply
+  const nameIdx = getCol(['item name', 'name', 'item', 'product'], is18ColFormat ? 3 : 2);
+  const brandIdx = getCol(['brand', 'make', 'oem'], is18ColFormat ? 4 : 3);
+  const descIdx = getCol(['description', 'desc', 'model', 'specs'], is18ColFormat ? 5 : 4);
+  const qtyIdx = getCol(['quantity', 'qty', 'count', 'units'], is18ColFormat ? 6 : 5);
+  const cityIdx = getCol(['location', 'city', 'warehouse', 'site', 'current location'], is18ColFormat ? 7 : 6);
+  const ownerIdx = getCol(['owner', 'company', 'client'], is18ColFormat ? 8 : 7);
+  const possessorIdx = getCol(['current possessor', 'possessor', 'custodian', 'holder', 'manager'], is18ColFormat ? 9 : 8);
+  const campaignIdx = getCol(['campaign', 'event', 'project', 'activity'], is18ColFormat ? 10 : 9);
+  const statusIdx = getCol(['status', 'state', 'asset status'], is18ColFormat ? 11 : 10);
+  const receivedByIdx = getCol(['received by', 'receiver', 'accepted by'], is18ColFormat ? 12 : 11);
+  const receivedOnIdx = getCol(['received on', 'received date', 'date received'], is18ColFormat ? 13 : 12);
+  const shippingToIdx = getCol(['shipping to', 'destination', 'ship to', 'dispatched to'], is18ColFormat ? 14 : 13);
+  const shippingDateIdx = getCol(['shipping date', 'ship date', 'dispatched date'], is18ColFormat ? 15 : 14);
+  const createdDateIdx = getCol(['created date', 'created on', 'date added', 'created'], is18ColFormat ? 16 : 15);
+  const lastUpdatedIdx = getCol(['last updated', 'updated on', 'last modified', 'updated'], is18ColFormat ? 17 : 16);
 
   const body = rows.slice(1);
   const rawAssets = body.map((r, i) => {
-    // Check if column 2 is boxId or if boxId exists
-    const hasBoxHeader = boxIdIdx !== -1;
-    let boxId = '';
-    let name = '';
-    let brand = '';
-    let desc = '';
-    let qty = 1;
-    let city = '';
-    let owner = '';
-    let possessor = '';
-    let campaign = '';
-    let status = '';
-    let receivedBy = '';
-    let receivedOn = '';
-    let shippingTo = '';
-    let shippingDate = '';
-    let createdDate = '';
-    let lastUpdated = '';
-
-    if (hasBoxHeader) {
-      boxId = String(r[boxIdIdx] || '');
-      name = String(r[2] || '');
-      brand = String(r[3] || '');
-      desc = String(r[4] || '');
-      qty = parseInt(r[5]) || 1;
-      city = String(r[6] || '');
-      owner = String(r[7] || '');
-      possessor = String(r[8] || '');
-      campaign = String(r[9] || '');
-      status = String(r[10] || '');
-      receivedBy = String(r[11] || '');
-      receivedOn = String(r[12] || '');
-      shippingTo = String(r[13] || '');
-      shippingDate = String(r[14] || '');
-      createdDate = String(r[15] || '');
-      lastUpdated = String(r[16] || '');
-    } else if (r.length >= 18) {
-      // 18+ columns means Box ID is inserted at index 2
-      boxId = String(r[2] || '');
-      name = String(r[3] || '');
-      brand = String(r[4] || '');
-      desc = String(r[5] || '');
-      qty = parseInt(r[6]) || 1;
-      city = String(r[7] || '');
-      owner = String(r[8] || '');
-      possessor = String(r[9] || '');
-      campaign = String(r[10] || '');
-      status = String(r[11] || '');
-      receivedBy = String(r[12] || '');
-      receivedOn = String(r[13] || '');
-      shippingTo = String(r[14] || '');
-      shippingDate = String(r[15] || '');
-      createdDate = String(r[16] || '');
-      lastUpdated = String(r[17] || '');
-    } else {
-      // Legacy format without Box ID
-      boxId = '';
-      name = String(r[2] || '');
-      brand = String(r[3] || '');
-      desc = String(r[4] || '');
-      qty = parseInt(r[5]) || 1;
-      city = String(r[6] || '');
-      owner = String(r[7] || '');
-      possessor = String(r[8] || '');
-      campaign = String(r[9] || '');
-      status = String(r[10] || '');
-      receivedBy = String(r[11] || '');
-      receivedOn = String(r[12] || '');
-      shippingTo = String(r[13] || '');
-      shippingDate = String(r[14] || '');
-      createdDate = String(r[15] || '');
-      lastUpdated = String(r[16] || '');
-    }
+    const assetId = String(r[assetIdIdx] || '').trim();
+    const serial = String(r[serialIdx] || '').trim();
+    const boxId = boxIdIdx !== -1 && r[boxIdIdx] !== undefined ? String(r[boxIdIdx] || '').trim() : '';
+    const name = String(r[nameIdx] || '').trim();
+    const brand = String(r[brandIdx] || '').trim();
+    const desc = String(r[descIdx] || '').trim();
+    const qty = parseInt(String(r[qtyIdx] || '1')) || 1;
+    const city = String(r[cityIdx] || '').trim();
+    const owner = String(r[ownerIdx] || '').trim();
+    const possessor = String(r[possessorIdx] || '').trim();
+    const campaign = String(r[campaignIdx] || '').trim();
+    const status = String(r[statusIdx] || '').trim();
+    const receivedBy = String(r[receivedByIdx] || '').trim();
+    const receivedOn = String(r[receivedOnIdx] || '').trim();
+    const shippingTo = String(r[shippingToIdx] || '').trim();
+    const shippingDate = String(r[shippingDateIdx] || '').trim();
+    const createdDate = String(r[createdDateIdx] || '').trim();
+    const lastUpdated = String(r[lastUpdatedIdx] || '').trim();
 
     return {
       sn: i + 1,
-      assetId: String(r[0] || ''),
-      serial: String(r[1] || ''),
+      assetId,
+      serial,
       boxId,
-      name,
+      name: name || desc || brand || 'Item',
       brand,
       desc,
       qty,
@@ -1141,7 +1143,7 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
       createdDate,
       lastUpdated
     };
-  }).filter(a => a.serial && a.name);
+  }).filter(a => a.serial && (a.name || a.brand || a.desc));
 
   return expandAssetsWithQuantities(rawAssets);
 }
@@ -1149,76 +1151,59 @@ function parseRowsToAssets(rows: any[][]): Asset[] {
 function parseRowsToGatePasses(rows: any[][]): GatePass[] {
   if (rows.length <= 1) return [];
   const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
-  const originAddrIdx = headerRow.indexOf('origin address');
-  const destAddrIdx = headerRow.indexOf('destination address');
-  const hasAddrHeaders = originAddrIdx !== -1 && destAddrIdx !== -1;
+  
+  const getCol = (possibleNames: string[], defaultIdx: number): number => {
+    for (const name of possibleNames) {
+      const idx = headerRow.indexOf(name.toLowerCase());
+      if (idx !== -1) return idx;
+    }
+    return defaultIdx;
+  };
+
+  const idIdx = getCol(['gate pass number', 'gate pass id', 'id', 'pass number'], 0);
+  const typeIdx = getCol(['pass type', 'type'], 1);
+  const companyIdx = getCol(['company', 'organization'], 2);
+  const serialsIdx = getCol(['serials', 'serial numbers', 'asset serials'], 3);
+  const originIdx = getCol(['origin', 'source', 'from'], 4);
+  const originAddrIdx = getCol(['origin address', 'origin addr', 'from address'], 5);
+  const destIdx = getCol(['destination', 'dest', 'to'], 6);
+  const destAddrIdx = getCol(['destination address', 'dest addr', 'to address'], 7);
+  const shipDateIdx = getCol(['shipping date', 'ship date', 'dispatch date'], 8);
+  const etaIdx = getCol(['eta', 'expected arrival', 'expected delivery'], 9);
+  const receiverIdx = getCol(['receiver', 'recipient', 'received by'], 10);
+  const possessorIdx = getCol(['possessor after', 'possessor', 'custodian'], 11);
+  const newStatusIdx = getCol(['new status', 'status'], 12);
+  const notesIdx = getCol(['notes', 'remarks', 'description'], 13);
+  const createdDateIdx = getCol(['created date', 'created on', 'date'], 14);
 
   const body = rows.slice(1);
   return body.map(r => {
     let serials: string[] = [];
+    const rawSerials = r[serialsIdx];
     try {
-      const parsed = JSON.parse(r[3] || '[]');
+      const parsed = JSON.parse(rawSerials || '[]');
       serials = Array.isArray(parsed) ? parsed : [];
     } catch {
-      serials = r[3] ? String(r[3]).split(',').map(s => s.trim()) : [];
+      serials = rawSerials ? String(rawSerials).split(',').map(s => s.trim()) : [];
     }
 
-    if (hasAddrHeaders) {
-      return {
-        id: String(r[0] || ''),
-        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
-        company: String(r[2] || ''),
-        serials,
-        origin: String(r[4] || ''),
-        originAddress: String(r[originAddrIdx] || ''),
-        dest: String(r[destAddrIdx - 1] || r[6] || ''),
-        destAddress: String(r[destAddrIdx] || ''),
-        shipDate: String(r[8] || ''),
-        eta: String(r[9] || ''),
-        receiver: String(r[10] || ''),
-        possessor: String(r[11] || ''),
-        newStatus: String(r[12] || ''),
-        notes: String(r[13] || ''),
-        createdDate: String(r[14] || '')
-      };
-    } else if (r.length >= 15) {
-      return {
-        id: String(r[0] || ''),
-        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
-        company: String(r[2] || ''),
-        serials,
-        origin: String(r[4] || ''),
-        originAddress: String(r[5] || ''),
-        dest: String(r[6] || ''),
-        destAddress: String(r[7] || ''),
-        shipDate: String(r[8] || ''),
-        eta: String(r[9] || ''),
-        receiver: String(r[10] || ''),
-        possessor: String(r[11] || ''),
-        newStatus: String(r[12] || ''),
-        notes: String(r[13] || ''),
-        createdDate: String(r[14] || '')
-      };
-    } else {
-      // Legacy 13-column format
-      return {
-        id: String(r[0] || ''),
-        type: (r[1] === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
-        company: String(r[2] || ''),
-        serials,
-        origin: String(r[4] || ''),
-        originAddress: '',
-        dest: String(r[5] || ''),
-        destAddress: '',
-        shipDate: String(r[6] || ''),
-        eta: String(r[7] || ''),
-        receiver: String(r[8] || ''),
-        possessor: String(r[9] || ''),
-        newStatus: String(r[10] || ''),
-        notes: String(r[11] || ''),
-        createdDate: String(r[12] || '')
-      };
-    }
+    return {
+      id: String(r[idIdx] || '').trim(),
+      type: (String(r[typeIdx] || '').toLowerCase() === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+      company: String(r[companyIdx] || '').trim(),
+      serials,
+      origin: String(r[originIdx] || '').trim(),
+      originAddress: String(r[originAddrIdx] || '').trim(),
+      dest: String(r[destIdx] || '').trim(),
+      destAddress: String(r[destAddrIdx] || '').trim(),
+      shipDate: String(r[shipDateIdx] || '').trim(),
+      eta: String(r[etaIdx] || '').trim(),
+      receiver: String(r[receiverIdx] || '').trim(),
+      possessor: String(r[possessorIdx] || '').trim(),
+      newStatus: String(r[newStatusIdx] || '').trim(),
+      notes: String(r[notesIdx] || '').trim(),
+      createdDate: String(r[createdDateIdx] || '').trim()
+    };
   }).filter(g => g.id);
 }
 
@@ -1396,57 +1381,101 @@ export function mapShipmentToRow(s: Shipment): any[] {
 
 export function parseRowsToShipments(rows: any[][]): Shipment[] {
   if (!rows || rows.length <= 1) return [];
+  const headerRow = rows[0].map(h => String(h || '').trim().toLowerCase());
+
+  const getCol = (possibleNames: string[], defaultIdx: number): number => {
+    for (const name of possibleNames) {
+      const idx = headerRow.indexOf(name.toLowerCase());
+      if (idx !== -1) return idx;
+    }
+    return defaultIdx;
+  };
+
+  const idIdx = getCol(['shipment id', 'id', 'shipment number'], 0);
+  const gatePassIdIdx = getCol(['gate pass id', 'gate pass number', 'gp id'], 1);
+  const statusIdx = getCol(['status', 'shipment status'], 2);
+  const typeIdx = getCol(['shipment type', 'type'], 3);
+  const priorityIdx = getCol(['priority'], 4);
+  const originIdx = getCol(['origin', 'source', 'from'], 5);
+  const destinationIdx = getCol(['destination', 'dest', 'to'], 6);
+  const currentLocIdx = getCol(['current location', 'location'], 7);
+  const campaignIdx = getCol(['campaign', 'event', 'project'], 8);
+  const courierIdx = getCol(['courier', 'transporter', 'carrier'], 9);
+  const trackingNumberIdx = getCol(['tracking number', 'tracking no', 'awb'], 10);
+  const vehicleNumberIdx = getCol(['vehicle number', 'vehicle no', 'truck no'], 11);
+  const driverNameIdx = getCol(['driver name', 'driver'], 12);
+  const driverContactIdx = getCol(['driver contact', 'driver phone'], 13);
+  const dispatchDateIdx = getCol(['dispatch date', 'shipping date', 'dispatched on'], 14);
+  const expectedDeliveryDateIdx = getCol(['expected delivery', 'eta', 'expected delivery date'], 15);
+  const actualDeliveryDateIdx = getCol(['actual delivery', 'delivery date', 'delivered on'], 16);
+  const senderIdx = getCol(['sender', 'dispatched by'], 17);
+  const receiverIdx = getCol(['receiver', 'received by', 'recipient'], 18);
+  const receiverContactIdx = getCol(['receiver contact', 'recipient contact', 'phone'], 19);
+  const currentPossessorIdx = getCol(['possessor', 'current possessor', 'custodian'], 20);
+  const totalAssetsIdx = getCol(['total assets', 'asset count', 'assets count'], 21);
+  const deliveredAssetsIdx = getCol(['delivered assets', 'delivered count'], 22);
+  const pendingAssetsIdx = getCol(['pending assets', 'pending count'], 23);
+  const returnedAssetsIdx = getCol(['returned assets', 'returned count'], 24);
+  const shippingCostIdx = getCol(['shipping cost', 'cost', 'freight charges'], 25);
+  const insuranceIdx = getCol(['insurance', 'insurance details'], 26);
+  const packageWeightIdx = getCol(['weight', 'package weight'], 27);
+  const boxesCountIdx = getCol(['boxes', 'boxes count', 'box count'], 28);
+  const remarksIdx = getCol(['remarks', 'notes', 'comments'], 29);
+  const lastUpdatedIdx = getCol(['last updated', 'updated on'], 30);
+  const assetsJsonIdx = getCol(['assets json', 'assets', 'items json'], 31);
+  const timelineJsonIdx = getCol(['timeline json', 'timeline', 'events json'], 32);
+
   const body = rows.slice(1);
   return body.map(r => {
     let assets: any[] = [];
     let timeline: any[] = [];
     try {
-      assets = JSON.parse(r[31] || '[]');
+      assets = JSON.parse(r[assetsJsonIdx] || '[]');
     } catch {
       assets = [];
     }
     try {
-      timeline = JSON.parse(r[32] || '[]');
+      timeline = JSON.parse(r[timelineJsonIdx] || '[]');
     } catch {
       timeline = [];
     }
     return {
-      id: String(r[0] || ''),
-      gatePassId: String(r[1] || ''),
-      status: (r[2] || 'In Transit') as any,
-      type: String(r[3] || 'Campaign Dispatch'),
-      priority: (r[4] || 'Medium') as any,
-      origin: String(r[5] || ''),
-      destination: String(r[6] || ''),
-      currentLocation: String(r[7] || ''),
-      campaign: String(r[8] || ''),
-      event: String(r[8] || 'Campaign Event'),
-      courier: String(r[9] || ''),
-      trackingNumber: String(r[10] || ''),
-      vehicleNumber: String(r[11] || ''),
-      driverName: String(r[12] || ''),
-      driverContact: String(r[13] || ''),
-      dispatchDate: String(r[14] || ''),
-      expectedDeliveryDate: String(r[15] || ''),
-      actualDeliveryDate: String(r[16] || ''),
-      sender: String(r[17] || ''),
-      receiver: String(r[18] || ''),
-      receiverContact: String(r[19] || ''),
-      currentPossessor: String(r[20] || ''),
-      shipmentOwner: String(r[20] || 'AFMV'),
-      totalAssets: parseInt(r[21]) || 0,
-      deliveredAssetsCount: parseInt(r[22]) || 0,
-      pendingAssetsCount: parseInt(r[23]) || 0,
-      returnedAssetsCount: parseInt(r[24]) || 0,
-      shippingCost: parseFloat(r[25]) || 0,
-      insurance: String(r[26] || ''),
-      packageWeight: String(r[27] || ''),
-      boxesCount: parseInt(r[28]) || 1,
-      remarks: String(r[29] || ''),
-      lastUpdated: String(r[30] || ''),
+      id: String(r[idIdx] || '').trim(),
+      gatePassId: String(r[gatePassIdIdx] || '').trim(),
+      status: (r[statusIdx] || 'In Transit') as any,
+      type: String(r[typeIdx] || 'Campaign Dispatch').trim(),
+      priority: (r[priorityIdx] || 'Medium') as any,
+      origin: String(r[originIdx] || '').trim(),
+      destination: String(r[destinationIdx] || '').trim(),
+      currentLocation: String(r[currentLocIdx] || '').trim(),
+      campaign: String(r[campaignIdx] || '').trim(),
+      event: String(r[campaignIdx] || 'Campaign Event').trim(),
+      courier: String(r[courierIdx] || '').trim(),
+      trackingNumber: String(r[trackingNumberIdx] || '').trim(),
+      vehicleNumber: String(r[vehicleNumberIdx] || '').trim(),
+      driverName: String(r[driverNameIdx] || '').trim(),
+      driverContact: String(r[driverContactIdx] || '').trim(),
+      dispatchDate: String(r[dispatchDateIdx] || '').trim(),
+      expectedDeliveryDate: String(r[expectedDeliveryDateIdx] || '').trim(),
+      actualDeliveryDate: String(r[actualDeliveryDateIdx] || '').trim(),
+      sender: String(r[senderIdx] || '').trim(),
+      receiver: String(r[receiverIdx] || '').trim(),
+      receiverContact: String(r[receiverContactIdx] || '').trim(),
+      currentPossessor: String(r[currentPossessorIdx] || '').trim(),
+      shipmentOwner: String(r[currentPossessorIdx] || 'AFMV').trim(),
+      totalAssets: parseInt(String(r[totalAssetsIdx] || '0')) || 0,
+      deliveredAssetsCount: parseInt(String(r[deliveredAssetsIdx] || '0')) || 0,
+      pendingAssetsCount: parseInt(String(r[pendingAssetsIdx] || '0')) || 0,
+      returnedAssetsCount: parseInt(String(r[returnedAssetsIdx] || '0')) || 0,
+      shippingCost: parseFloat(String(r[shippingCostIdx] || '0')) || 0,
+      insurance: String(r[insuranceIdx] || '').trim(),
+      packageWeight: String(r[packageWeightIdx] || '').trim(),
+      boxesCount: parseInt(String(r[boxesCountIdx] || '1')) || 1,
+      remarks: String(r[remarksIdx] || '').trim(),
+      lastUpdated: String(r[lastUpdatedIdx] || '').trim(),
       assets,
       timeline,
-      createdDate: String(r[14] || new Date().toISOString().split('T')[0])
+      createdDate: String(r[dispatchDateIdx] || new Date().toISOString().split('T')[0]).trim()
     };
   }).filter(s => s.id);
 }

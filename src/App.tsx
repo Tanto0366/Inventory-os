@@ -59,6 +59,7 @@ import {
 } from './lib/googleSheets';
 import { expandAssetsWithQuantities } from './lib/assetUtils';
 import { evaluateUserAuth, getUserRole, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail, isPrimarySuperAdmin } from './lib/auth';
+import { generateAssetId, generateGatePassId, generateShipmentId, generateTrackingNumber } from './domain/identity';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -956,7 +957,7 @@ export default function App() {
       return;
     }
 
-    const nextAssetId = `AST-${String(assets.length + 1).padStart(6, '0')}`;
+    const nextAssetId = generateAssetId(assets.map(a => a.assetId));
     const rawNewAsset: Asset = {
       sn: assets.length + 1,
       assetId: nextAssetId,
@@ -1119,7 +1120,7 @@ export default function App() {
       return;
     }
 
-    const nextId = `GP-${String(gatePasses.length + 1).padStart(3, '0')}`;
+    const nextId = generateGatePassId(gatePasses.map(g => g.id));
     const newPass: GatePass = {
       id: nextId,
       type: gpForm.type,
@@ -1157,7 +1158,7 @@ export default function App() {
     });
 
     // Auto-create linked Shipment Record
-    const shipmentId = `SHIP-${String(shipments.length + 1).padStart(3, '0')}`;
+    const shipmentId = generateShipmentId(shipments.map(s => s.id));
     const selectedAssetObjects = assets.filter(a => gpSelectedSerials.has(a.serial));
     const shipmentAssets: ShipmentAssetItem[] = selectedAssetObjects.map(a => ({
       serial: a.serial,
@@ -1185,7 +1186,7 @@ export default function App() {
       campaign: selectedAssetObjects[0]?.campaign || 'General',
       event: gpForm.notes || 'Gate Pass Asset Movement',
       courier: 'AFMV Express Logistics',
-      trackingNumber: `TRK-${Math.floor(100000 + Math.random() * 900000)}`,
+      trackingNumber: generateTrackingNumber('AFMV'),
       vehicleNumber: gpForm.vehicleNumber ? gpForm.vehicleNumber.trim() : '',
       driverName: gpForm.driverName ? gpForm.driverName.trim() : '',
       driverContact: gpForm.driverContact ? gpForm.driverContact.trim() : '',
