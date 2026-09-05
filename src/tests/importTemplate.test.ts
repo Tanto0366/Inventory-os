@@ -15,7 +15,7 @@ describe('Bulk Import Excel Template & Parser Consistency', () => {
       'Box ID',
       'Item Name',
       'Brand',
-      'Description',
+      'Product Name',
       'Quantity',
       'Location',
       'Owner',

@@ -7,7 +7,7 @@ describe('Google Sheets Schema Consistency Tests', () => {
       expectedColumns: 18,
       range: 'Assets Database!A:R',
       headers: [
-        'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Description', 
+        'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Product Name', 
         'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
         'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
         'Created Date', 'Last Updated'

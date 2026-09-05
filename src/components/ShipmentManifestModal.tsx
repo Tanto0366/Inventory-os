@@ -164,7 +164,7 @@ export const ShipmentManifestModal: React.FC<ShipmentManifestModalProps> = ({
                     <th className="p-3">Serial Number</th>
                     <th className="p-3">Box ID</th>
                     <th className="p-3">Item Name</th>
-                    <th className="p-3">Brand / Details</th>
+                    <th className="p-3">Brand / Product Name</th>
                     <th className="p-3 text-center">Qty</th>
                     <th className="p-3">Item Status</th>
                   </tr>

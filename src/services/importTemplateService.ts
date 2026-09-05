@@ -6,14 +6,14 @@ import { getMaxIdIndex } from '../domain/identity';
 /**
  * Canonical column headers for the Bulk Import Excel Template
  * Matching the Assets Database schema:
- * Serial Number, Box ID, Item Name, Brand, Description, Quantity, Location, Owner, Current Possessor, Status, Campaign
+ * Serial Number, Box ID, Item Name, Brand, Product Name, Quantity, Location, Owner, Current Possessor, Status, Campaign
  */
 export const IMPORT_TEMPLATE_HEADERS: readonly string[] = [
   'Serial Number',
   'Box ID',
   'Item Name',
   'Brand',
-  'Description',
+  'Product Name',
   'Quantity',
   'Location',
   'Owner',
@@ -75,9 +75,9 @@ export const INSTRUCTIONS_ENTRIES: readonly ColumnInstruction[] = [
     example: 'Lenovo'
   },
   {
-    field: 'Description',
+    field: 'Product Name',
     requirement: 'OPTIONAL',
-    description: 'Detailed specifications, model name, RAM/storage, CPU, or hardware details.',
+    description: 'Model or product name, specifications, or hardware details (e.g. Lenovo Legion 5, MacBook Pro 16).',
     example: 'Lenovo Legion 5'
   },
   {
@@ -139,7 +139,7 @@ export function createImportTemplateWorkbook(): XLSX.WorkBook {
     { wch: 12 }, // Box ID
     { wch: 18 }, // Item Name
     { wch: 16 }, // Brand
-    { wch: 24 }, // Description
+    { wch: 24 }, // Product Name
     { wch: 10 }, // Quantity
     { wch: 16 }, // Location
     { wch: 16 }, // Owner
@@ -210,9 +210,9 @@ export function parseUploadedWorksheet(
 
   const serialIdx = findIndex(['serial number', 'serial', 'serial no', 's/n serial', 'sn', 'serialnumber']);
   const boxIdIdx = findIndex(['box id', 'boxid', 'box', 'box_id', 'box no', 'carton']);
-  const nameIdx = findIndex(['item name', 'item', 'name', 'itemname', 'product name', 'product']);
+  const nameIdx = findIndex(['item name', 'item', 'name', 'itemname', 'category', 'asset name']);
   const brandIdx = findIndex(['brand', 'make', 'manufacturer', 'oem']);
-  const descIdx = findIndex(['description', 'desc', 'model', 'specs', 'details']);
+  const descIdx = findIndex(['product name', 'productname', 'product', 'description', 'desc', 'model', 'specs', 'details']);
   const qtyIdx = findIndex(['quantity', 'qty', 'count', 'units', 'pieces', 'pcs']);
   const cityIdx = findIndex(['location', 'city', 'warehouse', 'hub', 'site']);
   const ownerIdx = findIndex(['owner', 'company', 'client', 'organization']);

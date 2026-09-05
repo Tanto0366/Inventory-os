@@ -19,7 +19,7 @@ describe('Google Sheets Parser Robustness & Column Mapping Tests', () => {
   it('correctly parses canonical 18-column assets database with Box ID (Fixing deterministic column offset)', () => {
     const rows = [
       [
-        'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Description', 
+        'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Product Name', 
         'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
         'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
         'Created Date', 'Last Updated'

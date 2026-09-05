@@ -1338,7 +1338,7 @@ export default function App() {
 
     // 1. Assets Sheet
     const assetsHeaders = [
-      'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Model/Description', 
+      'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Product Name', 
       'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 'Status', 
       'Received By', 'Received On', 'Shipping To', 'Shipping Date'
     ];
@@ -1994,10 +1994,10 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#636E72] mb-1">Description / Model</label>
+                <label className="block text-xs font-semibold text-[#636E72] mb-1">Product Name</label>
                 <textarea 
                   rows={2}
-                  placeholder="e.g. Yoga Slim 9i, HP ProBook"
+                  placeholder="e.g. Lenovo Legion 5, MacBook Pro 16"
                   value={assetForm.desc}
                   onChange={(e) => setAssetForm({...assetForm, desc: e.target.value})}
                   className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none font-sans transition"
@@ -2220,9 +2220,10 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#636E72] mb-1">Description / Model</label>
+                <label className="block text-xs font-semibold text-[#636E72] mb-1">Product Name</label>
                 <textarea 
                   rows={2}
+                  placeholder="e.g. Lenovo Legion 5, MacBook Pro 16"
                   value={assetForm.desc}
                   onChange={(e) => setAssetForm({...assetForm, desc: e.target.value})}
                   className="w-full px-3 py-1.5 border border-[#DEE2E6] rounded-xl text-xs focus:border-[#6C5CE7] focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
@@ -2797,7 +2798,7 @@ export default function App() {
                       <th className="p-3">Serial No</th>
                       <th className="p-3">Item Name</th>
                       <th className="p-3">Brand</th>
-                      <th className="p-3">Description</th>
+                      <th className="p-3">Product Name</th>
                       <th className="p-3">Location</th>
                       <th className="p-3">Owner</th>
                       <th className="p-3">Status</th>

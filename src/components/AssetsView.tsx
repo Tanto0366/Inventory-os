@@ -215,7 +215,7 @@ export default function AssetsView({
                 </th>
                 <th className="p-4 w-16">Asset ID</th>
                 <th className="p-4">Item Name</th>
-                <th className="p-4">Brand / Desc</th>
+                <th className="p-4">Brand / Product Name</th>
                 <th className="p-4">Serial Number</th>
                 <th className="p-4">Box ID</th>
                 <th className="p-4">Location</th>

@@ -114,7 +114,7 @@ export interface SheetData {
 // Helpers for headers
 const HEADERS = {
   'Assets Database': [
-    'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Description', 
+    'Asset ID', 'Serial Number', 'Box ID', 'Item Name', 'Brand', 'Product Name', 
     'Quantity', 'Location', 'Owner', 'Current Possessor', 'Campaign', 
     'Status', 'Received By', 'Received On', 'Shipping To', 'Shipping Date', 
     'Created Date', 'Last Updated'
@@ -1117,9 +1117,9 @@ export function parseRowsToAssets(rows: any[][]): Asset[] {
   const assetIdIdx = getCol(['asset id', 'assetid', 'id', 'ast id'], 0);
   const serialIdx = getCol(['serial number', 'serial no', 'serialno', 'serial', 'sn', 'sr no'], 1);
   const boxIdIdx = getCol(['box id', 'boxid', 'box no', 'boxno', 'box', 'carton'], is18ColFormat ? 2 : -1);
-  const nameIdx = getCol(['item name', 'itemname', 'item', 'product name', 'product', 'asset name', 'name', 'model name'], is18ColFormat ? 3 : 2);
+  const nameIdx = getCol(['item name', 'itemname', 'item', 'category', 'asset name', 'name'], is18ColFormat ? 3 : 2);
   const brandIdx = getCol(['brand', 'make', 'manufacturer', 'oem'], is18ColFormat ? 4 : 3);
-  const descIdx = getCol(['description', 'desc', 'model', 'specs', 'details'], is18ColFormat ? 5 : 4);
+  const descIdx = getCol(['product name', 'productname', 'product', 'description', 'desc', 'model', 'specs', 'details', 'model name'], is18ColFormat ? 5 : 4);
   const qtyIdx = getCol(['quantity', 'qty', 'count', 'units', 'pieces', 'pcs'], is18ColFormat ? 6 : 5);
   const cityIdx = getCol(['location', 'city', 'warehouse', 'site', 'current location', 'hub'], is18ColFormat ? 7 : 6);
   const ownerIdx = getCol(['owner', 'company', 'client', 'organization'], is18ColFormat ? 8 : 7);
