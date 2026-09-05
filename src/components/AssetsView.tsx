@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Asset } from '../types';
 import { Search, SlidersHorizontal, Edit3, Trash2, CheckSquare, Square, ChevronDown } from 'lucide-react';
+import { getUniqueItemNames } from '../lib/assetFilters';
 
 interface AssetsViewProps {
   assets: Asset[];
@@ -20,6 +21,7 @@ export default function AssetsView({
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterItemName, setFilterItemName] = useState('');
   const [filterBrand, setFilterBrand] = useState('');
   const [filterCity, setFilterCity] = useState('');
   const [filterCampaign, setFilterCampaign] = useState('');
@@ -29,10 +31,11 @@ export default function AssetsView({
   const [selectedSerials, setSelectedSerials] = useState<Set<string>>(new Set());
 
   // Extract filter dropdown lists dynamically
-  const uniqueBrands = Array.from(new Set(assets.map(a => a.brand).filter(Boolean))).sort();
-  const uniqueCities = Array.from(new Set(assets.map(a => a.city).filter(Boolean))).sort();
-  const uniqueCampaigns = Array.from(new Set(assets.map(a => a.campaign).filter(Boolean))).sort();
-  const uniqueOwners = Array.from(new Set(assets.map(a => a.owner).filter(Boolean))).sort();
+  const uniqueItemNames = getUniqueItemNames(assets);
+  const uniqueBrands = Array.from(new Set(assets.map(a => a.brand?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const uniqueCities = Array.from(new Set(assets.map(a => a.city?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const uniqueCampaigns = Array.from(new Set(assets.map(a => a.campaign?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const uniqueOwners = Array.from(new Set(assets.map(a => a.owner?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
 
   // Combine filters
   const filteredAssets = assets.filter(a => {
@@ -54,10 +57,11 @@ export default function AssetsView({
 
     // Dropdowns
     if (filterStatus && a.status !== filterStatus) return false;
-    if (filterBrand && a.brand !== filterBrand) return false;
-    if (filterCity && a.city !== filterCity) return false;
-    if (filterCampaign && a.campaign !== filterCampaign) return false;
-    if (filterOwner && a.owner !== filterOwner) return false;
+    if (filterItemName && (a.name || '').trim() !== filterItemName) return false;
+    if (filterBrand && (a.brand || '').trim() !== filterBrand) return false;
+    if (filterCity && (a.city || '').trim() !== filterCity) return false;
+    if (filterCampaign && (a.campaign || '').trim() !== filterCampaign) return false;
+    if (filterOwner && (a.owner || '').trim() !== filterOwner) return false;
 
     return true;
   });
@@ -130,6 +134,8 @@ export default function AssetsView({
           </div>
 
           <select 
+            id="filter-status"
+            aria-label="Filter by Status"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
             className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
@@ -142,8 +148,23 @@ export default function AssetsView({
           </select>
 
           <select 
+            id="filter-item-name"
+            aria-label="Filter by Item Name"
+            value={filterItemName}
+            onChange={(e) => setFilterItemName(e.target.value)}
+            className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none font-sans"
+          >
+            <option value="">All Item Names</option>
+            {uniqueItemNames.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+
+          <select 
+            id="filter-brand"
+            aria-label="Filter by Brand"
             value={filterBrand}
-            onChange={(e) => setFilterBrand(targetBrandValue(e))}
+            onChange={(e) => setFilterBrand(e.target.value)}
             className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
           >
             <option value="">All Brands</option>
@@ -151,6 +172,8 @@ export default function AssetsView({
           </select>
 
           <select 
+            id="filter-city"
+            aria-label="Filter by City"
             value={filterCity}
             onChange={(e) => setFilterCity(e.target.value)}
             className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
@@ -160,6 +183,8 @@ export default function AssetsView({
           </select>
 
           <select 
+            id="filter-campaign"
+            aria-label="Filter by Campaign"
             value={filterCampaign}
             onChange={(e) => setFilterCampaign(e.target.value)}
             className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
@@ -169,6 +194,8 @@ export default function AssetsView({
           </select>
 
           <select 
+            id="filter-owner"
+            aria-label="Filter by Owner"
             value={filterOwner}
             onChange={(e) => setFilterOwner(e.target.value)}
             className="px-3 py-1.5 bg-[#F8F9FA] border border-[#DEE2E6] rounded-lg text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
@@ -177,11 +204,13 @@ export default function AssetsView({
             {uniqueOwners.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
 
-          {(filterStatus || filterBrand || filterCity || filterCampaign || filterOwner || searchQuery) && (
+          {(filterStatus || filterItemName || filterBrand || filterCity || filterCampaign || filterOwner || searchQuery) && (
             <button
+              id="btn-reset-filters"
               onClick={() => {
                 setSearchQuery('');
                 setFilterStatus('');
+                setFilterItemName('');
                 setFilterBrand('');
                 setFilterCity('');
                 setFilterCampaign('');
@@ -355,8 +384,4 @@ export default function AssetsView({
 
     </div>
   );
-}
-
-function targetBrandValue(e: React.ChangeEvent<HTMLSelectElement>) {
-  return e.target.value;
 }
