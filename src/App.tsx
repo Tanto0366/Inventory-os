@@ -60,6 +60,7 @@ import {
 import { expandAssetsWithQuantities } from './lib/assetUtils';
 import { evaluateUserAuth, getUserRole, assertSuperAdmin, PRIMARY_SUPER_ADMIN_EMAIL, normalizeEmail, isPrimarySuperAdmin } from './lib/auth';
 import { generateAssetId, generateGatePassId, generateShipmentId, generateTrackingNumber } from './domain/identity';
+import { downloadImportTemplate, parseUploadedWorksheet } from './services/importTemplateService';
 
 import LoginView from './components/LoginView';
 import SyncStatus from './components/SyncStatus';
@@ -1274,70 +1275,33 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        
+        // Select the template sheet or the first sheet that is not the 'Instructions' sheet
+        const targetSheetName = workbook.SheetNames.find(s => 
+          s.toLowerCase() === 'template' || 
+          s.toLowerCase() === 'assets' || 
+          s.toLowerCase() === 'inventory' ||
+          !s.toLowerCase().includes('instruction')
+        ) || workbook.SheetNames[0];
 
-      if (rows.length <= 1) {
-        alert('Empty worksheet uploaded.');
-        return;
+        const worksheet = workbook.Sheets[targetSheetName];
+        if (!worksheet) {
+          alert('Could not find data worksheet in uploaded workbook.');
+          return;
+        }
+
+        const parsed = parseUploadedWorksheet(worksheet, assets, user?.displayName || 'System');
+
+        setPendingImportData(parsed);
+        setImportPreviewOpen(true);
+        e.target.value = '';
+      } catch (err: any) {
+        console.error('Failed parsing uploaded sheet:', err);
+        alert(err?.message || 'Failed to parse worksheet.');
       }
-
-      // Column mapping logic (match case insensitive headers)
-      const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
-      const findIndex = (aliases: string[]) => headers.findIndex(h => aliases.includes(h));
-
-      const serialIdx = findIndex(['serial', 'serial number', 'serial no', 's/n serial']);
-      const boxIdIdx = findIndex(['box id', 'box', 'box_id', 'boxid', 'box no']);
-      const nameIdx = findIndex(['item', 'item name', 'name']);
-      const brandIdx = findIndex(['brand']);
-      const descIdx = findIndex(['description', 'desc', 'model']);
-      const qtyIdx = findIndex(['quantity', 'qty']);
-      const cityIdx = findIndex(['location', 'city']);
-      const ownerIdx = findIndex(['owner']);
-      const possessorIdx = findIndex(['possessor', 'current possession', 'current possessor']);
-      const statusIdx = findIndex(['status']);
-      const campaignIdx = findIndex(['campaign', 'currently used for (campaign)']);
-
-      if (serialIdx === -1 || nameIdx === -1) {
-        alert('Required columns "Serial Number" and "Item Name" could not be detected. Download the template for exact headers.');
-        return;
-      }
-
-      const parsedRaw: Asset[] = rows.slice(1).map((r, i) => {
-        const serial = String(r[serialIdx] || '').trim();
-        return {
-          sn: assets.length + i + 1,
-          assetId: `AST-${String(assets.length + i + 1).padStart(6, '0')}`,
-          serial,
-          boxId: boxIdIdx !== -1 ? String(r[boxIdIdx] || '').trim() : '—',
-          name: String(r[nameIdx] || ''),
-          brand: brandIdx !== -1 ? String(r[brandIdx] || '') : '',
-          desc: descIdx !== -1 ? String(r[descIdx] || '') : '',
-          qty: qtyIdx !== -1 ? parseInt(r[qtyIdx]) || 1 : 1,
-          city: cityIdx !== -1 ? String(r[cityIdx] || 'Bangalore') : 'Bangalore',
-          owner: ownerIdx !== -1 ? String(r[ownerIdx] || 'AFMV') : 'AFMV',
-          possessor: possessorIdx !== -1 ? String(r[possessorIdx] || 'Warehouse') : 'Warehouse',
-          status: statusIdx !== -1 ? String(r[statusIdx] || 'In House') : 'In House',
-          campaign: campaignIdx !== -1 ? String(r[campaignIdx] || 'Nil') : 'Nil',
-          receivedBy: user?.displayName || 'System',
-          receivedOn: new Date().toISOString().split('T')[0],
-          shippingTo: 'Nil',
-          shippingDate: 'Nil'
-        };
-      }).filter(item => item.serial && item.name);
-
-      const parsed = expandAssetsWithQuantities(parsedRaw);
-
-      if (parsed.length === 0) {
-        alert('No valid items containing serials and names were parsed.');
-        return;
-      }
-
-      setPendingImportData(parsed);
-      setImportPreviewOpen(true);
-      e.target.value = '';
     };
     reader.readAsArrayBuffer(file);
   };
@@ -1430,16 +1394,7 @@ export default function App() {
 
   // Download template helper
   const handleDownloadTemplate = () => {
-    const headers = [
-      ['Serial Number', 'Item Name', 'Brand', 'Description', 'Quantity', 'Location', 'Owner', 'Current Possession', 'Status', 'Campaign']
-    ];
-    const sample = [
-      ['PF5QGT2K', 'Laptop', 'Lenovo', 'Lenovo Legion 5', '1', 'Bangalore', 'AFMV', 'Nikhil', 'In House', 'Redington store Activity']
-    ];
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([...headers, ...sample]);
-    XLSX.utils.book_append_sheet(wb, ws, 'Template');
-    XLSX.writeFile(wb, 'InventoryOS_Import_Template.xlsx');
+    downloadImportTemplate('InventoryOS_Import_Template.xlsx');
   };
 
   // Gate Pass selection filtered assets
@@ -1873,7 +1828,7 @@ export default function App() {
                     Step 1: Get the Import Template
                   </h3>
                   <p className="text-xs text-[#636E72] leading-relaxed">
-                    Make sure your data headers match exactly to enable automatic validation and duplication skipping.
+                    Download the official template matching the canonical Assets Database schema (11 columns including <span className="font-semibold text-[#2D3436]">Box ID</span> and <span className="font-semibold text-[#2D3436]">Current Possessor</span>). Includes a dedicated <span className="font-semibold text-[#6C5CE7]">&ldquo;Instructions&rdquo;</span> sheet detailing column formats and marking required fields.
                   </p>
                   <button
                     onClick={handleDownloadTemplate}
