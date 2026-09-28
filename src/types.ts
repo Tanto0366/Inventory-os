@@ -187,4 +187,29 @@ export interface AdminLog {
   result?: string;
 }
 
+export interface ProductSummaryItem {
+  productName: string;
+  category: string;
+  brand: string;
+  totalQty: number;
+  inHouseQty: number;
+  deliveredQty: number;
+  inTransitQty: number;
+  readyPickupQty: number;
+  otherStatusQty: number;
+  locations: string[];
+  serialsCount: number;
+  serials: string[];
+}
+
+export interface ProductInventoryOverview {
+  productSummary: ProductSummaryItem[];
+  totalUniqueProducts: number;
+  totalQuantity: number;
+  totalInHouse: number;
+  totalDelivered: number;
+  totalInTransit: number;
+  totalReadyPickup: number;
+}
+
 

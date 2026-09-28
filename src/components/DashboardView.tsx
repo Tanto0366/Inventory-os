@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { Asset, AuditEntry, Campaign } from '../types';
+import { computeProductSummary, getProductInventoryOverview } from '../lib/productSummary';
 import { 
   ResponsiveContainer, 
   PieChart, 
@@ -12,7 +13,7 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { Package, Home, Send, Truck, Clock, Activity, Flag } from 'lucide-react';
+import { Package, Home, Send, Truck, Clock, Activity, Flag, Boxes, Search, ChevronRight, ChevronLeft } from 'lucide-react';
 
 interface DashboardViewProps {
   assets: Asset[];
@@ -21,6 +22,61 @@ interface DashboardViewProps {
 }
 
 export default function DashboardView({ assets, auditLogs, campaigns }: DashboardViewProps) {
+  // Product Inventory Summary state
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('');
+  const [productSortBy, setProductSortBy] = useState<'qty-desc' | 'qty-asc' | 'name-asc' | 'name-desc'>('qty-desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
+  // 1. Product-wise aggregation derived dataset
+  const productSummary = useMemo(() => computeProductSummary(assets), [assets]);
+  const productOverview = useMemo(() => getProductInventoryOverview(assets), [assets]);
+
+  // Extract unique categories from product summary for filtering
+  const uniqueCategories = useMemo(() => {
+    const set = new Set<string>();
+    productSummary.forEach(p => {
+      if (p.category && p.category !== '—') {
+        p.category.split(',').forEach(c => set.add(c.trim()));
+      }
+    });
+    return Array.from(set).sort();
+  }, [productSummary]);
+
+  // Filter and sort products
+  const filteredProducts = useMemo(() => {
+    return productSummary.filter(p => {
+      if (productSearchQuery) {
+        const q = productSearchQuery.toLowerCase();
+        const matches = 
+          p.productName.toLowerCase().includes(q) ||
+          p.brand.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q) ||
+          p.locations.some(loc => loc.toLowerCase().includes(q));
+        if (!matches) return false;
+      }
+      if (productCategoryFilter) {
+        if (!p.category.toLowerCase().includes(productCategoryFilter.toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    }).sort((a, b) => {
+      if (productSortBy === 'qty-desc') return b.totalQty - a.totalQty;
+      if (productSortBy === 'qty-asc') return a.totalQty - b.totalQty;
+      if (productSortBy === 'name-asc') return a.productName.localeCompare(b.productName);
+      if (productSortBy === 'name-desc') return b.productName.localeCompare(a.productName);
+      return 0;
+    });
+  }, [productSummary, productSearchQuery, productCategoryFilter, productSortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / itemsPerPage));
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredProducts.slice(start, start + itemsPerPage);
+  }, [filteredProducts, currentPage, itemsPerPage]);
+
   // 1. Calculate Metrics
   const totalAssets = assets.length;
   const inHouse = assets.filter(a => a.status === 'In House').length;
@@ -221,6 +277,304 @@ export default function DashboardView({ assets, auditLogs, campaigns }: Dashboar
             ))}
           </div>
         </div>
+
+      </div>
+
+      {/* Product Inventory Summary Section */}
+      <div className="bg-white border border-[#E9ECEF] rounded-3xl p-6 shadow-sm space-y-6">
+        
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#E9ECEF]">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-[#6C5CE7]/10 text-[#6C5CE7]">
+              <Boxes className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-[#2D3436] font-display">
+                  Product Inventory Summary
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#6C5CE7]/10 text-[#6C5CE7]">
+                  {productSummary.length} Products
+                </span>
+              </div>
+              <p className="text-xs text-[#636E72] mt-0.5">
+                Aggregated inventory quantities and deployment status grouped by product model
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Metrics Badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="bg-[#F8F9FA] border border-[#DEE2E6] px-3 py-1.5 rounded-xl text-xs flex items-center gap-2">
+              <span className="text-[#636E72] font-medium">Total Qty:</span>
+              <span className="font-mono font-bold text-[#2D3436]">{productOverview.totalQuantity} units</span>
+            </div>
+            <div className="bg-amber-50/70 border border-amber-200/60 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span className="text-amber-900 font-medium">In House:</span>
+              <span className="font-mono font-bold text-amber-800">{productOverview.totalInHouse}</span>
+            </div>
+            <div className="bg-green-50/70 border border-green-200/60 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500"></span>
+              <span className="text-green-900 font-medium">Delivered:</span>
+              <span className="font-mono font-bold text-green-800">{productOverview.totalDelivered}</span>
+            </div>
+            <div className="bg-blue-50/70 border border-blue-200/60 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span className="text-blue-900 font-medium">In Transit:</span>
+              <span className="font-mono font-bold text-blue-800">{productOverview.totalInTransit}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter and Search Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-[#ADB5BD]" />
+            <input 
+              type="text"
+              placeholder="Filter by product name, brand, or location..."
+              value={productSearchQuery}
+              onChange={(e) => {
+                setProductSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full pl-9 pr-4 py-2 bg-[#F8F9FA] border border-[#DEE2E6] rounded-xl text-xs font-sans text-[#2D3436] placeholder-[#ADB5BD] focus:border-[#6C5CE7] focus:bg-white focus:ring-2 focus:ring-[#6C5CE7]/10 outline-none transition"
+            />
+            {productSearchQuery && (
+              <button 
+                onClick={() => setProductSearchQuery('')}
+                className="absolute right-3 top-2.5 text-xs text-[#ADB5BD] hover:text-[#2D3436]"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {uniqueCategories.length > 0 && (
+              <select
+                value={productCategoryFilter}
+                onChange={(e) => {
+                  setProductCategoryFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-2 bg-[#F8F9FA] border border-[#DEE2E6] rounded-xl text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
+              >
+                <option value="">All Categories</option>
+                {uniqueCategories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            )}
+
+            <select
+              value={productSortBy}
+              onChange={(e) => setProductSortBy(e.target.value as any)}
+              className="px-3 py-2 bg-[#F8F9FA] border border-[#DEE2E6] rounded-xl text-xs font-medium text-[#636E72] focus:border-[#6C5CE7] outline-none"
+            >
+              <option value="qty-desc">Sort: Highest Quantity</option>
+              <option value="qty-asc">Sort: Lowest Quantity</option>
+              <option value="name-asc">Sort: Product (A-Z)</option>
+              <option value="name-desc">Sort: Product (Z-A)</option>
+            </select>
+
+            {(productSearchQuery || productCategoryFilter) && (
+              <button
+                onClick={() => {
+                  setProductSearchQuery('');
+                  setProductCategoryFilter('');
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-2 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-xl transition"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Product Inventory Table */}
+        <div className="overflow-x-auto rounded-2xl border border-[#E9ECEF]">
+          <table className="w-full border-collapse text-left text-xs md:text-sm">
+            <thead className="bg-[#F8F9FA] border-b border-[#E9ECEF] font-sans font-bold text-[#636E72] text-[11px] uppercase tracking-wider">
+              <tr>
+                <th className="p-3.5 w-12 text-center">#</th>
+                <th className="p-3.5">Product Name</th>
+                <th className="p-3.5">Brand</th>
+                <th className="p-3.5">Category</th>
+                <th className="p-3.5 text-center">Total Quantity</th>
+                <th className="p-3.5">Availability / Status</th>
+                <th className="p-3.5">Locations</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E9ECEF] bg-white">
+              {paginatedProducts.map((p, idx) => {
+                const globalIndex = (currentPage - 1) * itemsPerPage + idx + 1;
+                return (
+                  <tr key={p.productName} className="hover:bg-[#F8F9FA]/70 transition-colors">
+                    <td className="p-3.5 text-center font-mono text-[11px] text-[#ADB5BD]">
+                      {globalIndex}
+                    </td>
+                    <td className="p-3.5">
+                      <div className="font-semibold text-[#2D3436] font-display text-sm">
+                        {p.productName}
+                      </div>
+                      <div className="text-[11px] text-[#636E72] font-mono mt-0.5">
+                        {p.serialsCount} {p.serialsCount === 1 ? 'record' : 'records'}
+                      </div>
+                    </td>
+                    <td className="p-3.5">
+                      {p.brand && p.brand !== '—' ? (
+                        <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#F1F3F5] text-[#2D3436]">
+                          {p.brand}
+                        </span>
+                      ) : (
+                        <span className="text-[#ADB5BD]">—</span>
+                      )}
+                    </td>
+                    <td className="p-3.5 text-[#636E72] font-medium text-xs">
+                      {p.category}
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-mono font-bold bg-[#6C5CE7]/10 text-[#6C5CE7] border border-[#6C5CE7]/20 shadow-xs">
+                        {p.totalQty} {p.totalQty === 1 ? 'unit' : 'units'}
+                      </span>
+                    </td>
+                    <td className="p-3.5">
+                      <div className="space-y-1.5 min-w-[180px]">
+                        {/* Multi-segment distribution bar */}
+                        <div className="h-2 w-full bg-[#F1F3F5] rounded-full overflow-hidden flex">
+                          {p.inHouseQty > 0 && (
+                            <div 
+                              className="bg-amber-500 h-full" 
+                              style={{ width: `${(p.inHouseQty / p.totalQty) * 100}%` }}
+                              title={`In House: ${p.inHouseQty}`}
+                            />
+                          )}
+                          {p.deliveredQty > 0 && (
+                            <div 
+                              className="bg-green-600 h-full" 
+                              style={{ width: `${(p.deliveredQty / p.totalQty) * 100}%` }}
+                              title={`Delivered: ${p.deliveredQty}`}
+                            />
+                          )}
+                          {p.inTransitQty > 0 && (
+                            <div 
+                              className="bg-blue-600 h-full" 
+                              style={{ width: `${(p.inTransitQty / p.totalQty) * 100}%` }}
+                              title={`In Transit: ${p.inTransitQty}`}
+                            />
+                          )}
+                          {p.readyPickupQty > 0 && (
+                            <div 
+                              className="bg-teal-600 h-full" 
+                              style={{ width: `${(p.readyPickupQty / p.totalQty) * 100}%` }}
+                              title={`Ready for Pickup: ${p.readyPickupQty}`}
+                            />
+                          )}
+                          {p.otherStatusQty > 0 && (
+                            <div 
+                              className="bg-gray-400 h-full" 
+                              style={{ width: `${(p.otherStatusQty / p.totalQty) * 100}%` }}
+                              title={`Other: ${p.otherStatusQty}`}
+                            />
+                          )}
+                        </div>
+
+                        {/* Breakdown tags */}
+                        <div className="flex flex-wrap gap-1 text-[10px] font-mono">
+                          {p.inHouseQty > 0 && (
+                            <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/50">
+                              {p.inHouseQty} in house
+                            </span>
+                          )}
+                          {p.deliveredQty > 0 && (
+                            <span className="text-green-800 bg-green-50 px-1.5 py-0.5 rounded border border-green-200/50">
+                              {p.deliveredQty} delivered
+                            </span>
+                          )}
+                          {p.inTransitQty > 0 && (
+                            <span className="text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/50">
+                              {p.inTransitQty} transit
+                            </span>
+                          )}
+                          {p.readyPickupQty > 0 && (
+                            <span className="text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200/50">
+                              {p.readyPickupQty} ready
+                            </span>
+                          )}
+                          {p.otherStatusQty > 0 && (
+                            <span className="text-gray-700 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200/50">
+                              {p.otherStatusQty} other
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-3.5">
+                      <div className="flex flex-wrap gap-1 max-w-[200px]">
+                        {p.locations.length > 0 ? (
+                          p.locations.slice(0, 2).map(loc => (
+                            <span key={loc} className="text-[11px] font-sans px-2 py-0.5 bg-[#F8F9FA] border border-[#DEE2E6] text-[#636E72] rounded-md">
+                              {loc}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[#ADB5BD]">—</span>
+                        )}
+                        {p.locations.length > 2 && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 bg-gray-100 text-[#636E72] rounded-md" title={p.locations.slice(2).join(', ')}>
+                            +{p.locations.length - 2} more
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {paginatedProducts.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-[#ADB5BD]">
+                    <Boxes className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                    <p className="font-semibold text-sm text-[#636E72]">No matching products found</p>
+                    <p className="text-xs mt-1">Try adjusting your search query or filters.</p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination & Count footer */}
+        {filteredProducts.length > itemsPerPage && (
+          <div className="flex items-center justify-between text-xs text-[#636E72] pt-2">
+            <span>
+              Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredProducts.length)} to {Math.min(currentPage * itemsPerPage, filteredProducts.length)} of {filteredProducts.length} products
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                disabled={currentPage === 1}
+                className="p-1.5 rounded-lg border border-[#DEE2E6] hover:bg-[#F8F9FA] disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="font-mono font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="p-1.5 rounded-lg border border-[#DEE2E6] hover:bg-[#F8F9FA] disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
 
