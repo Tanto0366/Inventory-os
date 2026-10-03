@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Asset } from '../types';
-import { Search, SlidersHorizontal, Edit3, Trash2, CheckSquare, Square, ChevronDown } from 'lucide-react';
+import { Search, SlidersHorizontal, Edit3, Trash2, CheckSquare, Square, ChevronDown, FileSpreadsheet, X } from 'lucide-react';
 import { getUniqueItemNames } from '../lib/assetFilters';
+import { exportSelectedAssetsToExcel } from '../lib/excelExport';
 
 interface AssetsViewProps {
   assets: Asset[];
@@ -29,6 +30,9 @@ export default function AssetsView({
 
   // Row selection state
   const [selectedSerials, setSelectedSerials] = useState<Set<string>>(new Set());
+
+  // Compute selected asset records from master assets array (persisting across active filters)
+  const selectedAssets = assets.filter(a => selectedSerials.has(a.serial));
 
   // Extract filter dropdown lists dynamically
   const uniqueItemNames = getUniqueItemNames(assets);
@@ -86,6 +90,22 @@ export default function AssetsView({
       else next.delete(serial);
       return next;
     });
+  };
+
+  const handleExportSelected = () => {
+    if (selectedAssets.length === 0) {
+      alert('Please select at least one asset to export.');
+      return;
+    }
+
+    const result = exportSelectedAssetsToExcel(selectedAssets);
+    if (!result.success && result.error) {
+      alert(result.error);
+    }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedSerials(new Set());
   };
 
   const handleBulkDeleteAction = () => {
@@ -226,6 +246,59 @@ export default function AssetsView({
 
       </div>
 
+      {/* Floating / Sticky Selection Action Toolbar */}
+      {selectedSerials.size > 0 && (
+        <div 
+          data-testid="selection-toolbar"
+          className="bg-indigo-50/70 border border-[#6C5CE7]/30 rounded-2xl px-5 py-3 shadow-xs flex flex-wrap items-center justify-between gap-3 transition-all animate-in fade-in duration-200"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-[#6C5CE7]/15 flex items-center justify-center text-[#6C5CE7]">
+              <CheckSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-[#2D3436] font-display">
+                {selectedSerials.size} {selectedSerials.size === 1 ? 'asset selected' : 'assets selected'}
+              </span>
+              <span className="text-[11px] text-[#636E72] font-mono ml-2">
+                ({selectedAssets.length} records ready for export)
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearSelection}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-gray-50 border border-[#DEE2E6] text-[#636E72] hover:text-[#2D3436] rounded-xl text-xs font-semibold font-sans transition shadow-2xs active:scale-95 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              Clear Selection
+            </button>
+
+            <button
+              id="btn-export-selected-excel"
+              onClick={handleExportSelected}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-xl text-xs font-semibold font-sans transition shadow-xs active:scale-95 cursor-pointer"
+              title="Export selected assets to Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Export Excel
+            </button>
+
+            {isAdmin && (
+              <button
+                onClick={handleBulkDeleteAction}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold font-sans transition shadow-xs active:scale-95 cursor-pointer"
+                title="Delete selected assets"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Bulk Delete
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Table Section */}
       <div className="bg-white border border-[#E9ECEF] rounded-3xl shadow-sm overflow-hidden">
         
@@ -364,10 +437,27 @@ export default function AssetsView({
           </span>
 
           {selectedSerials.size > 0 && (
-            <div className="flex items-center gap-3 text-xs">
-              <span className="font-semibold text-[#6C5CE7] font-mono">
-                {selectedSerials.size} asset(s) selected
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-[#6C5CE7] font-mono mr-1">
+                {selectedSerials.size} {selectedSerials.size === 1 ? 'asset' : 'assets'} selected
               </span>
+
+              <button
+                id="btn-footer-export-selected-excel"
+                onClick={handleExportSelected}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#6C5CE7] hover:bg-[#5A4ED1] text-white rounded-lg font-semibold transition cursor-pointer"
+                title="Export selected assets to Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
+              </button>
+
+              <button
+                onClick={handleClearSelection}
+                className="px-2.5 py-1.5 bg-white hover:bg-gray-50 border border-[#DEE2E6] text-[#636E72] hover:text-[#2D3436] rounded-lg font-medium transition cursor-pointer"
+              >
+                Clear
+              </button>
+
               {isAdmin && (
                 <button
                   onClick={handleBulkDeleteAction}
